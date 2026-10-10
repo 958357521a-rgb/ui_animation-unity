@@ -1,0 +1,7 @@
+# Windows 脚本必须是 CRLF 换行(cmd / PowerShell / VBScript 按行读,LF 换行时 goto、标签会出错)
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+*.vbs text eol=crlf
+*.png binary
+*.ico binary

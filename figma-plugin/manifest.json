@@ -1,0 +1,16 @@
+{
+  "name": "BUD UI Studio",
+  "id": "bud-ui-studio-export",
+  "api": "1.0.0",
+  "main": "code.js",
+  "ui": { "main": "ui.html", "import": "import.html" },
+  "menu": [
+    { "name": "导出给工作台(选中界面 → .budfig.json)", "command": "export" },
+    { "name": "从工作台导入(工程 → 图层)", "command": "import" }
+  ],
+  "editorType": ["figma"],
+  "documentAccess": "dynamic-page",
+  "networkAccess": {
+    "allowedDomains": ["none"]
+  }
+}

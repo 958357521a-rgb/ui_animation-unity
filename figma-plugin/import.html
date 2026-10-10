@@ -1,0 +1,96 @@
+<!-- BUD UI Studio 插件 · 「从工作台导入」界面:选工作台工程(.budui.json)和参考图(PNG),在 Figma 里还原成图层 -->
+<style>
+  body { font: 12px/1.6 -apple-system, "Microsoft YaHei", sans-serif; margin: 0; padding: 14px; color: var(--figma-color-text); background: var(--figma-color-bg); }
+  h3 { margin: 0 0 6px; font-size: 14px; }
+  .hint { color: var(--figma-color-text-secondary); margin-bottom: 10px; }
+  label { display: block; margin: 10px 0 4px; font-weight: 600; }
+  input[type=text] { width: 100%; box-sizing: border-box; padding: 6px 8px; border: 1px solid var(--figma-color-border); border-radius: 6px; background: var(--figma-color-bg); color: inherit; }
+  .files { max-height: 180px; overflow: auto; border: 1px solid var(--figma-color-border); border-radius: 6px; padding: 6px 8px; margin-top: 6px; }
+  .files div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  button { margin-top: 12px; padding: 8px 14px; border: 0; border-radius: 6px; background: var(--figma-color-bg-brand); color: #fff; font-weight: 600; cursor: pointer; }
+  button[disabled] { opacity: .45; cursor: default; }
+  button.sec { background: none; color: inherit; border: 1px solid var(--figma-color-border); }
+  #log { margin-top: 12px; white-space: pre-wrap; color: var(--figma-color-text-secondary); }
+  .err { color: var(--figma-color-text-danger); }
+</style>
+<h3>从 BUD UI Studio 导入</h3>
+<div class="hint">把工作台工程(.budui.json)还原成可编辑的 Figma 图层:每个工程一个分区、每个界面一张 2436×1125 画框;切图是图片图层,文字是可编辑文字。PNG 会作为参考图放进「参考图」分区。同名分区再导入会替换。</div>
+<label>放到哪个页面(没有就新建)</label>
+<input type="text" id="page" value="lijixiantest">
+<label>选择文件(可多选:.budui.json 和 .png)</label>
+<input type="file" id="pick" multiple accept=".json,.png,.jpg,.jpeg,.webp">
+<div class="files" id="files" hidden></div>
+<button id="go" disabled>导入</button> <button class="sec" id="close">关闭</button>
+<div id="log"></div>
+<script>
+const $ = s => document.querySelector(s), log = (t, cls) => { const d = document.createElement("div"); if (cls) d.className = cls; d.textContent = t; $("#log").appendChild(d); $("#log").scrollTop = 1e9; };
+let picked = [], seq = 0;
+const waiters = {};
+onmessage = e => {
+  const m = e.data.pluginMessage; if (!m) return;
+  if (m.type === "init") $("#page").value = $("#page").value || "lijixiantest";
+  else if (m.type === "progress") $("#log").lastChild && $("#log").lastChild.dataset.p ? ($("#log").lastChild.textContent = m.text) : (log(m.text), $("#log").lastChild.dataset.p = 1);
+  else if (m.type === "ack" || m.type === "error") { const w = waiters[m.id]; delete waiters[m.id]; if (w) m.type === "ack" ? w[0]() : w[1](new Error(m.text)); }
+  else if (m.type === "done") {
+    log(`✓ 完成:页面「${m.page}」,${m.sections.length} 个分区,${m.nodes} 个图层。`);
+    if (m.fallbacks.length) log("本机缺少这些字体,已用替补(装上思源黑体 CN / Montserrat 后重新导入即可):" + m.fallbacks.join(";"));
+  }
+};
+const send = msg => new Promise((ok, bad) => { msg.id = ++seq; waiters[msg.id] = [ok, bad]; parent.postMessage({ pluginMessage: msg }, "*"); });
+
+$("#pick").onchange = e => {
+  picked = [...e.target.files];
+  $("#files").hidden = !picked.length;
+  $("#files").innerHTML = picked.map(f => `<div>${/\.json$/i.test(f.name) ? "📦" : "🖼"} ${f.name} <span style="opacity:.6">${(f.size / 1048576).toFixed(1)} MB</span></div>`).join("");
+  $("#go").disabled = !picked.length;
+};
+$("#close").onclick = () => parent.postMessage({ pluginMessage: { type: "close" } }, "*");
+
+// Figma 图片上限 4096:超过的先等比缩小;返回 {b64, w, h}
+function fitImage(src) {
+  return new Promise((ok, bad) => {
+    const img = new Image();
+    img.onload = () => {
+      let w = img.naturalWidth, h = img.naturalHeight;
+      const big = Math.max(w, h) > 4096, isPng = /^data:image\/png/.test(src);
+      if (!big && isPng) return ok({ b64: src.split(",")[1], w, h });
+      if (big) { const k = 4096 / Math.max(w, h); w = Math.max(1, Math.round(w * k)); h = Math.max(1, Math.round(h * k)); }
+      const c = document.createElement("canvas"); c.width = w; c.height = h; c.getContext("2d").drawImage(img, 0, 0, w, h);
+      ok({ b64: c.toDataURL("image/png").split(",")[1], w, h });
+    };
+    img.onerror = () => bad(new Error("图片解码失败"));
+    img.src = src;
+  });
+}
+const readText = f => f.text();
+const readDataUrl = f => new Promise((ok, bad) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = bad; r.readAsDataURL(f); });
+
+$("#go").onclick = async () => {
+  $("#go").disabled = true; $("#log").innerHTML = "";
+  try {
+    await send({ type: "begin", page: $("#page").value.trim() || "lijixiantest" });
+    const pngs = [];
+    for (const f of picked) {
+      if (/\.json$/i.test(f.name)) {
+        log(`读取 ${f.name}…`);
+        const p = JSON.parse(await readText(f));
+        if (!p.pages && p.nodes) p.pages = [{ id: "pg1", name: "主页面", kind: "page", nodes: p.nodes }];
+        if (!p.pages) { log(`${f.name} 不是工作台工程,跳过`, "err"); continue; }
+        const assets = {}, ids = Object.keys(p.assets || {});
+        for (let i = 0; i < ids.length; i++) {
+          const a = p.assets[ids[i]];
+          if (a && a.dataUrl) { try { assets[ids[i]] = (await fitImage(a.dataUrl)).b64; } catch (e) { log(`图片「${a.name}」解码失败,跳过`, "err"); } }
+        }
+        const title = (p.taskName || p.module || f.name.replace(/\.budui\.json$/i, "")) + (p.module && p.taskName ? ` · ${p.module}` : "");
+        await send({ type: "project", project: { title, module: p.module || "", pages: p.pages, assets } });
+        log(`✓ ${title}:${p.pages.length} 个界面`);
+      } else {
+        pngs.push(Object.assign({ name: f.name.replace(/\.[^.]+$/, "") }, await fitImage(await readDataUrl(f))));
+      }
+    }
+    if (pngs.length) { await send({ type: "images", title: "参考图", images: pngs }); log(`✓ 参考图 ${pngs.length} 张`); }
+    await send({ type: "end" });
+  } catch (e) { log("导入失败:" + e.message, "err"); }
+  $("#go").disabled = false;
+};
+</script>

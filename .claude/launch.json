@@ -1,0 +1,43 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "budui-studio",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "dev/studio_server.py",
+        "8791"
+      ],
+      "port": 8791
+    },
+    {
+      "name": "budui-studio-test",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "dev/studio_server.py",
+        "8792"
+      ],
+      "port": 8792
+    },
+    {
+      "name": "budui-studio-lan",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "dev/studio_server.py",
+        "8790",
+        "--lan"
+      ],
+      "port": 8790
+    },
+    {
+      "name": "budui-studio-lan-test",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "dev/studio_server.py",
+        "8793",
+        "--lan"
+      ],
+      "port": 8793
+    }
+  ]
+}

@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<style>
+  body{margin:0;padding:14px;font:12px/1.6 "PingFang SC","Microsoft YaHei",Inter,sans-serif;color:var(--figma-color-text,#222);background:var(--figma-color-bg,#fff)}
+  h3{margin:0 0 6px;font-size:14px}
+  .hint{color:var(--figma-color-text-secondary,#777)}
+  .list{max-height:300px;overflow:auto;border:1px solid var(--figma-color-border,#e5e5e5);border-radius:6px;padding:4px;margin:10px 0 6px}
+  label.item{display:flex;gap:8px;align-items:center;padding:5px 6px;border-radius:4px;cursor:pointer}
+  label.item:hover{background:var(--figma-color-bg-hover,#f5f5f5)}
+  label.item .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  label.item .sz{color:var(--figma-color-text-secondary,#999);font-size:11px}
+  .bulk{display:flex;gap:12px;margin-bottom:10px}
+  .bulk a{color:var(--figma-color-text-brand,#18a0fb);cursor:pointer;text-decoration:none}
+  button{width:100%;padding:9px;border:0;border-radius:6px;background:var(--figma-color-bg-brand,#18a0fb);color:var(--figma-color-text-onbrand,#fff);font:inherit;font-weight:600;cursor:pointer}
+  button:disabled{opacity:.4;cursor:default}
+  #prog{margin-top:10px;min-height:20px}
+  #prog.ok{color:var(--figma-color-text-success,#14ae5c)}
+  #prog.err{color:var(--figma-color-text-danger,#f24822)}
+  .warn{color:var(--figma-color-text-warning,#b86200)}
+</style>
+</head>
+<body>
+  <h3>导出到 BUD UI Studio</h3>
+  <div id="status" class="hint">请在画布上选中一个或多个界面(Frame),也可以直接选中整张总览画板。</div>
+  <div id="list" class="list" style="display:none"></div>
+  <div id="bulk" class="bulk" style="display:none"><a id="all">全选</a><a id="none">全不选</a><span id="picked" class="hint"></span></div>
+  <button id="go" disabled>导出</button>
+  <div id="prog" class="hint"></div>
+<script>
+  var screens = [];
+  var $ = function (id) { return document.getElementById(id); };
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]; }); }
+  function checkedIds() { return Array.prototype.slice.call(document.querySelectorAll("#list input:checked")).map(function (i) { return i.value; }); }
+  function refreshButton() {
+    var n = checkedIds().length;
+    $("go").disabled = n === 0;
+    $("go").textContent = n ? "导出选中的 " + n + " 个界面" : "导出";
+    $("picked").textContent = screens.length > 1 ? "已选 " + n + "/" + screens.length : "";
+  }
+  function render(board) {
+    var list = $("list");
+    if (!screens.length) {
+      $("status").innerHTML = "请在画布上选中一个或多个界面(Frame),也可以直接选中整张总览画板。";
+      list.style.display = "none"; $("bulk").style.display = "none"; refreshButton(); return;
+    }
+    var odd = screens.filter(function (s) { return Math.abs(s.w / s.h - 2436 / 1125) > 0.15; }).length;
+    $("status").innerHTML = (board ? "总览画板「" + esc(board) + "」里识别到 " + screens.length + " 个界面,勾选要导出的:" : "已选中 " + screens.length + " 个界面:")
+      + (odd ? "<br><span class='warn'>其中 " + odd + " 个不是 2436×1125 比例,导出后会按宽度缩放到 2436</span>" : "");
+    list.innerHTML = screens.map(function (s) {
+      return "<label class='item'><input type='checkbox' value='" + esc(s.id) + "' checked><span class='nm'>" + esc(s.name) + "</span><span class='sz'>" + s.w + "×" + s.h + "</span></label>";
+    }).join("");
+    list.style.display = "block";
+    $("bulk").style.display = screens.length > 1 ? "flex" : "none";
+    list.onchange = refreshButton;
+    refreshButton();
+  }
+  function download(name, text) {
+    var blob = new Blob([text], { type: "application/json" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 5000);
+  }
+  $("all").onclick = function () { document.querySelectorAll("#list input").forEach(function (i) { i.checked = true; }); refreshButton(); };
+  $("none").onclick = function () { document.querySelectorAll("#list input").forEach(function (i) { i.checked = false; }); refreshButton(); };
+  $("go").onclick = function () {
+    $("go").disabled = true; $("prog").className = "hint"; $("prog").textContent = "开始导出…";
+    parent.postMessage({ pluginMessage: { type: "export", ids: checkedIds() } }, "*");
+  };
+  onmessage = function (e) {
+    var m = e.data && e.data.pluginMessage; if (!m) return;
+    if (m.type === "selection") { screens = m.screens; render(m.board); }
+    else if (m.type === "progress") { $("prog").className = "hint"; $("prog").textContent = m.text; }
+    else if (m.type === "error") { $("prog").className = "err"; $("prog").textContent = "导出失败:" + m.text; refreshButton(); }
+    else if (m.type === "done") {
+      var base = String(m.fileName || "figma").replace(/[\\/:*?"<>|]/g, "_");
+      download(base + "_" + m.count + "个界面.budfig.json", m.json);
+      var mb = (m.json.length / 1048576).toFixed(1);
+      $("prog").className = "ok";
+      $("prog").innerHTML = "✓ 已导出 " + m.count + " 个界面、" + m.images + " 张切图(约 " + mb + " MB)"
+        + (m.skipped ? "<br><span class='warn'>有 " + m.skipped + " 个图层导出失败,已跳过</span>" : "")
+        + "<br>到 BUD UI Studio 点「导入插件包」选择这个文件即可。";
+      refreshButton();
+    }
+  };
+</script>
+</body>
+</html>
