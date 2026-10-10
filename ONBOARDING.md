@@ -8,8 +8,8 @@
 
 1. **拿到工作台**:原作者在 GitHub 上把私有仓库共享给你(邮件里点接受邀请)。装 [GitHub Desktop](https://desktop.github.com/),登录后 File → Clone repository 选这个仓库,放到任意位置(路径里有中文也没关系)。也可以用命令行 `git clone <仓库地址>`。
 2. **双击文件夹里的「安装与自检.bat」**:逐项检查 Python、Pillow、Node.js、浏览器、工作台服务、AI 重绘、Unity,缺什么照提示补(缺 Pillow 会自动装)。没装 Python 时它会告诉你怎么装,装好再双击一次。
-3. **工程数据从 U 盘拷**(仓库里不带工程文件:几十 MB 且含游戏美术资源):把 U 盘里 `projects/` 下的 `.budui.json` 放进你这份文件夹的 `projects/`;原作者导出的「全部任务」文件,在工作台任务首页点「从工程文件导入」选它,任务、素材、动效会原样出现。原作者开着「启动局域网共享.bat」时,也可以在任务首页「从共享文件夹载入」直接选原作者电脑上的工程。
-4. **AI 重绘(可选)**:你的电脑没有大显存 N 卡,用原作者电脑共享的 ComfyUI:把 `dev/ai_remote.example.json` 复制一份改名 `dev/ai_remote.json`,填上原作者「启动局域网共享.bat」窗口里打印的地址和口令,再跑一次「安装与自检.bat」选 Y 试跑一张。详见下文「7. AI 重绘」。
+3. **工程数据从 U 盘拷**(仓库里不带工程文件:几十 MB 且含游戏美术资源):把 U 盘里 `projects/` 下的 `.budui.json` 放进你这份文件夹的 `projects/`;原作者导出的「全部任务」文件,在工作台任务首页点「从工程文件导入」选它,任务、素材、动效会原样出现。
+4. **AI 重绘(可选,要实测)**:U 盘里的「AI重绘环境」= ComfyUI + 3 个模型(约 20 GB),按里面的「说明.txt」装到你电脑上,再跑一次「安装与自检.bat」选 Y 试跑一张,把用时和效果发给原作者。你的显卡(RTX 2060)显存比模型小,能不能用、用多大分辨率以实测为准。详见下文「7. AI 重绘」。
 5. **用 Claude Code 打开这个文件夹**(桌面版在 Code 页选择文件夹;命令行版在文件夹里运行 `claude`),对它说:**「按 ONBOARDING.md 帮我把工作台跑起来」**。之后直接用中文说要做什么就行,比如「把 Figma 里新的总览画板导进来」「重新配一下动效」「覆盖到 Unity」。
 
 ## 更新到新版本
@@ -18,7 +18,7 @@
 
 1. 关掉正在跑的本地服务再重开(桌面「BUD UI Studio」图标起的是后台服务,在任务管理器结束 `pythonw.exe`,再双击图标;Claude 桌面版让它重启 `budui-studio` 预览)。不重开的话服务还是旧代码,新功能会报错。
 2. 刷新工作台页面(Ctrl+F5)。
-3. 你在浏览器里做的任务存在浏览器本地,`projects/`、`dev/ai_remote.json` 也不在仓库里,更新碰不到它们。
+3. 你在浏览器里做的任务存在浏览器本地,`projects/` 也不在仓库里,更新碰不到它们。
 4. 不要直接改仓库里的文件再 pull(会冲突);要改工作台本身,先和原作者说好谁改。
 
 ## 这个系统是什么
@@ -84,7 +84,7 @@ Figma 设计稿 ──导入──▶ 工作台还原图层(文字可编辑,其�
 
 ### 5. 载入工程(新电脑必做)
 
-1. 工程文件不在仓库里(`.gitignore` 排除了 `projects/`),从原作者的 U 盘拷进 `projects/`,或原作者开着局域网共享时在任务首页「从共享文件夹载入」。有原作者导出的「全部任务」文件就优先导它(任务首页「从工程文件导入」),所有任务一次到位;否则请同事点工具栏「载入工程」→ 选 `projects/Sign.budui.json`(约 33 MB,最新的充值福利,含全部贴图,要等几秒)。系统的选文件窗口 Claude 操作不了。
+1. 工程文件不在仓库里(`.gitignore` 排除了 `projects/`),从原作者的 U 盘拷进 `projects/`。有原作者导出的「全部任务」文件就优先导它(任务首页「从工程文件导入」),所有任务一次到位;否则请同事点工具栏「载入工程」→ 选 `projects/Sign.budui.json`(约 33 MB,最新的充值福利,含全部贴图,要等几秒)。系统的选文件窗口 Claude 操作不了。
 2. 载入后会成为一个任务(左上角显示任务名)。以左侧「页面」列表为准,`Sign` 应有 11 页:🏠 05 奖励总览;📄 06 圣天使之翼 / 07 自选特效 / 10 发型 / 11 鞋子(可领取)/ 12 鞋子(已领取)/ 14 自选动作;🗨 04 福利规则 / 08 确认兑换 / 09 兑换成功 / 13 领取成功。模块名框里是 `Sign`。
 3. 之后会自动保存到这个浏览器;同一浏览器、同一地址刷新后会回到上次的任务。
 
@@ -98,9 +98,9 @@ Figma 设计稿 ──导入──▶ 工作台还原图层(文字可编辑,其�
 ### 7. AI 重绘(可选:批量统一旧界面风格)
 
 - 工具:`dev/restyle/restyle.py`(重绘切图)、`dev/restyle/prefab_sprites.py`(列出一个 prefab 用到的全部切图)、`dev/restyle/swap_in_place.py`(把新切图原路径换进主工程:默认只演练,`--apply` 才写,旧图备份到 `backups/<时间>-restyle/`,`--undo` 还原)。做法和踩坑见 `docs/经验与决定.md` 的「AI 重绘」。
-- 需要 ComfyUI + 3 个模型(Qwen Image 2.1 int8、Qwen3-VL 8B 文本编码、VAE,约 16 GB)和 16 GB 以上显存的 NVIDIA 显卡。**没有就用原作者电脑共享的**:原作者双击「启动局域网共享.bat」(同时要开着 ComfyUI),窗口里会打印一行 `{"server": ..., "key": ...}`,把它存成同事这边的 `dev/ai_remote.json`,`restyle.py` 就会自动走原作者电脑的显卡;两台电脑要在同一局域网。
-- 安全:原作者电脑的 ComfyUI 仍只听本机,局域网只能通过工作台服务的「AI 转发口」用,要口令,只放行重绘用的接口和节点。口令在原作者的 `dev/ai_share_key.txt`(第一次启动时生成,以后不变),不进仓库;口令泄露了就删掉这个文件重开共享,会生成新口令。
-- 共享的 ComfyUI 一次只跑一张,原作者自己在用时要排队;每张约 20~30 秒。
+- 需要本机的 ComfyUI + 3 个模型(Qwen Image 2.1 int8、Qwen3-VL 8B 文本编码、VAE,约 16 GB)。原作者把精简过的 ComfyUI 便携版连同这 3 个模型放在 U 盘的「AI重绘环境」里:整个拷到电脑上(建议 `D:\ComfyUI_windows_portable`,别放进工作台文件夹)→「校验模型.bat」→「启动 ComfyUI.bat」(窗口别关)→ 工作台的「安装与自检.bat」选 Y 试跑。`restyle.py` 默认连本机 8188。
+- 硬件:原作者用 RTX 4090(24 GB 显存)每张约 20~30 秒。显存比模型小(比如 6 GB 的 RTX 2060)时,ComfyUI 会把放不下的部分放在内存里来回搬:能跑但慢很多,电脑内存最好 32 GB 以上;爆显存就改用「启动 ComfyUI(显存不够时用).bat」、`restyle.py` 加 `--res 768`。环境包里的 PyTorch 基于 CUDA 13,NVIDIA 驱动要 580 以上(自检会查)。
+- 原作者决定(10-10):不通过原作者电脑共享 AI。实测跑不动的电脑就不做 AI 重绘,这一步交给有大显存显卡的电脑批量做,成品切图经 Figma / U 盘给过去。
 
 ## 怎么操作这个系统
 
@@ -179,12 +179,11 @@ proj.module = $("#moduleName").value; fetch("/api/save-project?name=" + encodeUR
 | 路径 | 是什么 |
 |---|---|
 | `BUD_UI_Studio.html` | 软件本体(单文件 HTML + JS,零依赖) |
-| `projects/` | 工程文件(含贴图,**不在仓库里**,从 U 盘或共享文件夹拿):`Sign.budui.json` = 最新的充值福利(11 页,已覆盖进 207);`GemPack.budui.json` = 钻石页 |
+| `projects/` | 工程文件(含贴图,**不在仓库里**,从 U 盘拷):`Sign.budui.json` = 最新的充值福利(11 页,已覆盖进 207);`GemPack.budui.json` = 钻石页 |
 | `安装与自检.bat`、`dev/setup_check.py` | 新电脑环境自检(选 Y 会试跑一张 AI 重绘) |
 | `dev/restyle/` | AI 重绘工具(见「7. AI 重绘」);`templates/` 是统一风格的参考图 |
-| `dev/ai_remote.example.json` | 用别人电脑共享的 ComfyUI 时的配置样例(复制成 `dev/ai_remote.json` 再填,不进仓库) |
 | `docs/经验与决定.md` | 原作者的产品决定和踩坑记录(从原作者的 Claude 记忆整理) |
-| `.gitignore` | 不进仓库的:工程文件、备份、导出物、本机口令和配置 |
+| `.gitignore` | 不进仓库的:工程文件、备份、导出物、本机口令 |
 | `figma-plugin/` | Figma 导出插件(`manifest.json` / `code.js` / `ui.html`)和安装说明 |
 | `dev/studio_server.py` | 本地服务:托管工作台 + `POST /api/save-project` 写回工程 + `POST /api/save-export` 把交付包另存到 `exports/` |
 | `exports/` | 导出时自动生成:交付包 `.unitypackage` 的另存副本(打包交接时不需要带) |
@@ -194,8 +193,8 @@ proj.module = $("#moduleName").value; fetch("/api/save-project?name=" + encodeUR
 | `unity-reference/` | 主工程接入参考代码:`Sign/SignPanel.Logic.cs`(207 的业务逻辑)、`GemPack/`(钻石页逻辑草稿)、试点版外壳面板 / Adapter、UI 导入体检工具。覆盖到 Unity 时主工程缺 Logic 文件会从这里带进去 |
 | `dev/unity_preview.py`、`dev/unity/` | Unity 截图验收工具(脚本临时带进 Unity 工程,跑完删掉) |
 | `backups/` | 「覆盖到 Unity」前自动备份的主工程旧文件(本机生成,不随包分发) |
-| `.claude/launch.json` | Claude Code 预览配置:`budui-studio`(8791,日常用)、`budui-studio-test`(8792,测试用)、`budui-studio-lan`(8790,局域网共享)、`budui-studio-lan-test`(8793,测局域网 / AI 转发口用) |
-| `启动局域网共享.bat` | 双击开局域网共享(8790),窗口里打印发给同事的链接和 AI 共享配置 |
+| `.claude/launch.json` | Claude Code 预览配置:`budui-studio`(8791,日常用)、`budui-studio-test`(8792,测试用)、`budui-studio-lan`(8790,局域网共享)、`budui-studio-lan-test`(8793,测局域网共享用) |
+| `启动局域网共享.bat` | 双击开局域网共享(8790),窗口里打印发给同事的链接 |
 | `创建桌面快捷方式.bat`、`dev/app_launch.*`、`dev/make_shortcut.ps1`、`dev/app.ico` | 桌面应用:快捷方式 → `app_launch.vbs`(无窗口)→ `app_launch.ps1`(后台起 8791 服务 + Edge `--app` 打开 file:// 工作台) |
 | `README.md` | 使用说明(给人看的完整功能介绍) |
 

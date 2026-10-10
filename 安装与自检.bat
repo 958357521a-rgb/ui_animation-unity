@@ -17,7 +17,7 @@ if not defined PY (
 )
 %PY% dev\setup_check.py
 echo.
-choice /c YN /n /m "要不要试跑一张 AI 重绘,确认 AI 重绘能用?(约半分钟起,共享的 ComfyUI 忙时要排队)[Y/N] "
+choice /c YN /n /m "要不要试跑一张 AI 重绘,确认 AI 重绘能用?(约半分钟起,小显存显卡要几分钟)[Y/N] "
 if errorlevel 2 goto end
 %PY% dev\setup_check.py --smoke
 :end

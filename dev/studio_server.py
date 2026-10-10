@@ -13,10 +13,7 @@
 # --lan:监听所有网卡,同一局域网的同事用 http://<本机局域网 IP>:<端口>/ 直接打开工作台(工程存在各自浏览器里)。
 #   别的电脑只能读工作台页面、projects/ 工程文件、figma-plugin/、docs/、README.md;
 #   写接口(覆盖到 Unity、写回工程、另存交付包)和其余文件(backups/、dev/、主工程相关)只认本机(127.0.0.1)。
-# /api/ai/*:AI 重绘转发口——没有好显卡的同事用这台电脑的 ComfyUI(本机 8188,继续只听 127.0.0.1)跑 dev/restyle/restyle.py。
-#   要带口令(请求头 X-BudUI-AI-Key = dev/ai_share_key.txt,第一次启动时生成、以后不变);只放行 restyle.py 用到的
-#   上传图片 / 提交任务 / 查进度 / 取结果,提交的任务只能由重绘用的那几种节点组成(ComfyUI 本身没有任何鉴权,不能直接开到局域网)。
-import base64, datetime, glob, http.server, json, os, re, secrets, shutil, socket, sys, urllib.error, urllib.parse, urllib.request
+import base64, datetime, glob, http.server, json, os, re, secrets, shutil, socket, sys, urllib.parse
 
 # pythonw 启动(桌面应用在后台无窗口起服务)时没有控制台,stdout/stderr 是 None:请求日志一写就抛异常、连接被掐断
 if sys.stdout is None or sys.stderr is None:
@@ -39,25 +36,6 @@ PORT = next((int(a) for a in sys.argv[1:] if a.isdigit()), 8791)
 TOKEN = secrets.token_hex(16)
 TOKEN_FILE = os.path.join(ROOT, "dev", f"local_token_{PORT}.js")
 saved = False
-COMFY = os.environ.get("BUDUI_COMFY", "http://127.0.0.1:8188")
-AI_KEY_FILE = os.path.join(ROOT, "dev", "ai_share_key.txt")
-AI_NODES = {"UNETLoader", "QwenImage21Cache", "CLIPLoader", "VAELoader", "TextEncodeQwenImage21", "KSampler", "VAEDecode", "SaveImage", "LoadImage"}
-
-
-def ai_share_key():
-    """AI 转发口的口令:存在 dev/ai_share_key.txt(不通过 HTTP 提供),第一次用时生成,之后不变,同事的配置不用每次改"""
-    try:
-        k = open(AI_KEY_FILE, encoding="utf-8").read().strip()
-    except OSError:
-        k = ""
-    if not re.fullmatch(r"[0-9a-f]{32}", k):
-        k = secrets.token_hex(16)
-        with open(AI_KEY_FILE, "w", encoding="utf-8") as f:
-            f.write(k + "\n")
-    return k
-
-
-AI_KEY = ai_share_key()
 
 
 def safe_name(raw, default):
@@ -451,8 +429,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         super().end_headers()
 
     def do_GET(self):
-        if self.path.startswith("/api/ai/"):
-            return self.do_ai("GET")
         if urllib.parse.urlparse(self.path).path == "/api/projects":   # 工作台「从共享文件夹载入」:列出 projects/ 里的工程文件
             items = [{"name": os.path.basename(f), "bytes": os.path.getsize(f), "mtime": int(os.path.getmtime(f) * 1000)}
                      for f in glob.glob(os.path.join(PROJECTS, "*.budui.json"))]
@@ -532,49 +508,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         except (ValueError, OSError) as e:
             return self.reply(400, {"error": str(e)})
 
-    def do_ai(self, method):
-        """AI 重绘转发口:口令对、接口和节点都在白名单里,才转给本机 ComfyUI"""
-        sub = self.path[len("/api/ai"):]
-        p = urllib.parse.urlparse(sub).path
-        allowed = (method == "POST" and p in ("/upload/image", "/prompt")) or (method == "GET" and (
-            p in ("/view", "/system_stats") or re.fullmatch(r"/history/[0-9a-fA-F-]{8,64}", p) or re.fullmatch(r"/object_info/\w+", p)))
-        if not allowed:
-            return self.reply(404, {"error": "AI 转发口只提供重绘用的接口"})
-        if not secrets.compare_digest(self.headers.get("X-BudUI-AI-Key", ""), AI_KEY):
-            return self.reply(403, {"error": "AI 共享口令不对:向共享 AI 的那台电脑要 dev/ai_share_key.txt 里的口令,填进自己的 dev/ai_remote.json"})
-        body, headers = None, {}
-        if method == "POST":
-            n = int(self.headers.get("Content-Length", 0))
-            if n > 64 * 1024 * 1024:
-                return self.reply(413, {"error": "单个请求超过 64 MB"})
-            body = self.rfile.read(n)
-            headers["Content-Type"] = self.headers.get("Content-Type", "application/octet-stream")
-            if p == "/prompt":
-                try:
-                    g = json.loads(body)["prompt"]
-                    bad = sorted({node.get("class_type") for node in g.values()} - AI_NODES)
-                except (ValueError, KeyError, TypeError, AttributeError):
-                    return self.reply(400, {"error": "任务格式不对"})
-                if bad:
-                    return self.reply(403, {"error": "AI 转发口只跑重绘流程,不支持这些节点:" + ", ".join(map(str, bad))})
-        try:
-            with urllib.request.urlopen(urllib.request.Request(COMFY + sub, data=body, method=method, headers=headers), timeout=120) as r:
-                code, ctype, data = r.status, r.headers.get("Content-Type", "application/octet-stream"), r.read()
-        except urllib.error.HTTPError as e:
-            code, ctype, data = e.code, e.headers.get("Content-Type", "text/plain"), e.read()
-        except OSError as e:
-            return self.reply(502, {"error": f"这台电脑上的 ComfyUI({COMFY})没在运行或连不上:{e}"})
-        self.send_response(code)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
-
     def do_POST(self):
         global saved
         url = urllib.parse.urlparse(self.path)
-        if url.path.startswith("/api/ai/"):
-            return self.do_ai("POST")
         if not self.is_local():   # 局域网共享时:写主工程、写文件夹的接口只给主机自己用
             return self.reply(403, {"error": "局域网打开的工作台不能用这个功能:覆盖到 Unity、写回工程只能在共享工作台的那台电脑上操作。可以「导出交付包」或「保存工程」发给对方。"})
         if url.path in ("/api/unity/search", "/api/unity/match", "/api/unity/scan", "/api/unity/apply", "/api/unity/sprites", "/api/unity/file"):
@@ -636,13 +572,5 @@ if __name__ == "__main__":
         for i, ip in enumerate(ips):
             print(f"{'局域网链接(发给同事)' if i == 0 else '其他网卡(虚拟机等,一般用不到)'}:http://{ip}:{PORT}/", flush=True)
         print("别的电脑打不开的话:Windows 防火墙要允许 Python 在「专用网络」上接收连接(第一次启动时弹窗点「允许访问」)", flush=True)
-        try:
-            urllib.request.urlopen(COMFY + "/system_stats", timeout=3).read()
-            comfy = "本机 ComfyUI 在运行"
-        except OSError:
-            comfy = "本机 ComfyUI 现在没开(同事重绘前要先把 ComfyUI 打开)"
-        if ips:
-            print(f"AI 重绘共享({comfy}):同事的 dev/ai_remote.json 填 "
-                  f'{{"server": "http://{ips[0]}:{PORT}", "key": "{AI_KEY}"}}', flush=True)
     while not (ONCE and saved):
         server.handle_request()

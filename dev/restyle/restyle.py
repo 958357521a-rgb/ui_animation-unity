@@ -1,6 +1,5 @@
 # 按模板风格重绘旧 UI 切图(本机 ComfyUI + Qwen Image 2.1,接法照官方模板 image_qwen_image_2_1_image_edit)
-# 用法:python dev/restyle/restyle.py 旧图1.png 旧图2.png ... --out <输出目录> --refs dev/restyle/templates/template_gempack.png dev/restyle/templates/template_sign.png [--keep-shape] [--max-aspect 2.5] [--seed N] [--port 8188] [--server http://<IP>:8790 --key <口令>]
-# 本机没有好显卡:用别人电脑共享的 ComfyUI,配置 dev/ai_remote.json(见 dev/ai_remote.example.json)或加 --server/--key。
+# 用法:python dev/restyle/restyle.py 旧图1.png 旧图2.png ... --out <输出目录> --refs dev/restyle/templates/template_gempack.png dev/restyle/templates/template_sign.png [--keep-shape] [--max-aspect 2.5] [--seed N] [--port 8188]
 # 模板图 = 207 / 钻石页新稿用主工程字体合成后裁出的内容区(原作者 2026-10-10 指定的统一风格模板)。Python 用真实解释器 %LOCALAPPDATA%\Python\bin\python(PATH 里的 WindowsApps python 是占位程序)。
 # 每张旧图:image_1 = 旧图(输出尺寸跟随它),image_2.. = 模板参考图 → 重绘 → 缩回原尺寸(保留 RGBA)→ <out>/<名字>.png,
 # 再拼一张新旧对比图 <out>/_compare.png。只读旧图,不写主工程。
@@ -16,19 +15,8 @@ ap.add_argument("--prompt", default=None); ap.add_argument("olds", nargs="+")
 ap.add_argument("--max-aspect", type=float, default=2.5, help="长宽比超过它的旧图先补透明边再送进模型,出图后裁回原区域")
 ap.add_argument("--neg", default=None, help="反向提示词(整屏重绘时要去掉 text,否则界面文字会被抹掉)")
 ap.add_argument("--keep-shape", action="store_true", help="新图透明通道 = min(新, 旧):轮廓严格不超出旧图")
-ap.add_argument("--server", default=None, help="用别的电脑共享的 ComfyUI:http://<IP>:8790(对方开着「启动局域网共享.bat」);不填就读 dev/ai_remote.json,再没有就用本机 --port")
-ap.add_argument("--key", default=None, help="共享方 dev/ai_share_key.txt 里的口令(--server 时用)")
 a = ap.parse_args()
-# 本机没有好显卡时,dev/ai_remote.json = {"server": "http://<共享电脑 IP>:8790", "key": "<口令>"},经对方的工作台服务转发到对方本机的 ComfyUI
-REMOTE_CFG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ai_remote.json")
-remote = {}
-if a.server is None and os.path.exists(REMOTE_CFG):
-    remote = json.load(open(REMOTE_CFG, encoding="utf-8-sig"))
-server, key = a.server or remote.get("server"), a.key or remote.get("key") or ""
-BASE = server.rstrip("/") + "/api/ai" if server else f"http://127.0.0.1:{a.port}"
-AUTH = {"X-BudUI-AI-Key": key} if server else {}
-if server:
-    print(f"用共享的 ComfyUI:{server}", flush=True)
+BASE = f"http://127.0.0.1:{a.port}"
 os.makedirs(a.out, exist_ok=True)
 
 PROMPT = a.prompt or (
@@ -42,7 +30,7 @@ PROMPT = a.prompt or (
 NEG = a.neg if a.neg is not None else "text, letters, watermark, logo, extra objects, characters, photo, realistic photo, blurry, low quality, distorted shape"
 
 def post(path, data, headers):
-    return json.load(urllib.request.urlopen(urllib.request.Request(BASE + path, data=data, headers={**headers, **AUTH}), timeout=60))
+    return json.load(urllib.request.urlopen(urllib.request.Request(BASE + path, data=data, headers=headers), timeout=60))
 
 def upload(path):
     name = "budui_" + uuid.uuid4().hex[:8] + "_" + os.path.basename(path)
@@ -75,7 +63,7 @@ def run(g):
     t0 = time.time()
     while True:
         time.sleep(2)
-        h = json.load(urllib.request.urlopen(urllib.request.Request(f"{BASE}/history/{pid}", headers=AUTH), timeout=30))
+        h = json.load(urllib.request.urlopen(f"{BASE}/history/{pid}", timeout=30))
         if pid in h:
             st = h[pid].get("status", {})
             if st.get("status_str") == "error":
@@ -84,7 +72,7 @@ def run(g):
             if outs:
                 im = outs[0]
                 q = urllib.parse.urlencode({"filename": im["filename"], "subfolder": im["subfolder"], "type": im["type"]})
-                return Image.open(io.BytesIO(urllib.request.urlopen(urllib.request.Request(f"{BASE}/view?{q}", headers=AUTH), timeout=60).read())), time.time() - t0
+                return Image.open(io.BytesIO(urllib.request.urlopen(f"{BASE}/view?{q}", timeout=60).read())), time.time() - t0
         if time.time() - t0 > 900: raise TimeoutError(pid)
 
 import urllib.parse

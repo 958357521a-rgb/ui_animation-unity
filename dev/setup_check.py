@@ -1,7 +1,7 @@
 # 新电脑上手自检(双击「安装与自检.bat」运行):逐项检查工作台要用的环境,缺什么用中文说怎么补;能自动补的(Pillow)直接补。
-# 用法:python dev/setup_check.py [--smoke 试跑一张 AI 重绘(约半分钟起)]
+# 用法:python dev/setup_check.py [--smoke 试跑一张 AI 重绘(4090 约半分钟,小显存显卡要几分钟)]
 # 只读检查,不改系统设置;唯一会做的修改是缺 Pillow 时 pip 安装它。
-import json, os, shutil, socket, subprocess, sys, tempfile, urllib.error, urllib.request
+import json, os, socket, subprocess, sys, tempfile, urllib.request
 for _s in (sys.stdout, sys.stderr):
     try:
         _s.reconfigure(encoding="utf-8", errors="replace")
@@ -74,25 +74,39 @@ if os.path.exists(os.path.join(desktop, "BUD UI Studio.lnk")):
 else:
     warn("桌面还没有「BUD UI Studio」", "双击「创建桌面快捷方式.bat」")
 
-print("\n[3] AI 重绘(ComfyUI + Qwen Image 2.1)")
-cfg_path = os.path.join(ROOT, "dev", "ai_remote.json")
-remote = {}
-if os.path.exists(cfg_path):
-    try:
-        remote = json.load(open(cfg_path, encoding="utf-8-sig"))
-    except ValueError:
-        bad("dev/ai_remote.json 格式不对", '内容应是 {"server": "http://<共享电脑 IP>:8790", "key": "<口令>"}')
-base = remote["server"].rstrip("/") + "/api/ai" if remote.get("server") else "http://127.0.0.1:8188"
-hdr = {"X-BudUI-AI-Key": remote.get("key", "")} if remote.get("server") else {}
-where = f"共享的 ComfyUI({remote['server']})" if remote.get("server") else "本机 ComfyUI(127.0.0.1:8188)"
+print("\n[3] AI 重绘(可选:本机 ComfyUI + Qwen Image 2.1,环境包从原作者的 U 盘拷)")
+import ctypes
+class _MEM(ctypes.Structure):
+    _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong)] + [(n, ctypes.c_ulonglong) for n in
+               ("ullTotalPhys", "ullAvailPhys", "ullTotalPageFile", "ullAvailPageFile", "ullTotalVirtual", "ullAvailVirtual", "ullAvailExtendedVirtual")]
+ram_gb = 0
+try:
+    m = _MEM(); m.dwLength = ctypes.sizeof(_MEM); ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(m)); ram_gb = m.ullTotalPhys / 2**30
+except (AttributeError, OSError):
+    pass
+gpu = run(["nvidia-smi", "--query-gpu=name,memory.total,driver_version", "--format=csv,noheader,nounits"]).splitlines()
+vram_gb = 0
+if gpu:
+    name, mem, drv = [x.strip() for x in gpu[0].split(",")[:3]]
+    vram_gb = float(mem) / 1024
+    print(f"  · 显卡 {name},显存 {vram_gb:.0f} GB,驱动 {drv};内存 {ram_gb:.0f} GB")
+    if float(drv.split(".")[0]) < 580:
+        bad(f"NVIDIA 驱动太旧({drv})", "AI 环境包里的 PyTorch 基于 CUDA 13,要 580 以上的驱动:到 https://www.nvidia.cn/drivers/ 下载这张显卡的最新驱动,装完重启")
+    if vram_gb < 16:
+        warn(f"显存只有 {vram_gb:.0f} GB(模型约 16 GB)", "ComfyUI 会把放不下的部分放在内存里来回搬:能跑但慢,分辨率高了可能爆显存。"
+             "试跑会按显存自动降到 768 分辨率,看耗时和效果再决定用不用")
+    if ram_gb and ram_gb < 32:
+        warn(f"内存只有 {ram_gb:.0f} GB", "显存不够时模型要放在内存里,内存最好 32 GB 以上,否则可能卡死或报内存不足")
+else:
+    warn("没检测到 NVIDIA 显卡(或没装驱动)", "AI 重绘要 NVIDIA 显卡;没有的话这一项用不了,工作台其他功能不受影响")
 def get(path):
-    with urllib.request.urlopen(urllib.request.Request(base + path, headers=hdr), timeout=10) as r:
+    with urllib.request.urlopen("http://127.0.0.1:8188" + path, timeout=10) as r:
         return json.load(r)
 ai_ok = False
 try:
     st = get("/system_stats")
     dev = (st.get("devices") or [{}])[0]
-    ok(f"{where} 连得上:{dev.get('name', '?')},显存 {dev.get('vram_total', 0) / 2**30:.0f} GB")
+    ok(f"本机 ComfyUI 在运行:{dev.get('name', '?')}")
     missing = []
     for node, (field, fname) in MODELS.items():
         info = get("/object_info/" + node).get(node, {})
@@ -100,39 +114,37 @@ try:
         if fname not in opts:
             missing.append(fname)
     if not get("/object_info/TextEncodeQwenImage21"):
-        bad("ComfyUI 太旧,没有 Qwen Image 2.1 节点", "更新 ComfyUI 到 0.37 或更新版本")
+        bad("ComfyUI 太旧,没有 Qwen Image 2.1 节点", "用原作者 U 盘里的 AI 环境包")
     elif missing:
-        bad("ComfyUI 缺模型:" + "、".join(missing), "从原作者电脑拷这几个模型到 ComfyUI/models 对应目录(diffusion_models / text_encoders / vae)")
+        bad("ComfyUI 缺模型:" + "、".join(missing), "从原作者 U 盘的 AI 环境包里拷,放进 ComfyUI/models 对应目录(diffusion_models / text_encoders / vae);拷完运行环境包里的「校验模型.bat」")
     else:
         ok("模型齐全:Qwen Image 2.1 int8、Qwen3-VL 8B 文本编码、VAE")
         ai_ok = True
-except urllib.error.HTTPError as e:
-    msg = e.read().decode("utf-8", "replace")
-    try:
-        msg = json.loads(msg)["error"]
-    except (ValueError, KeyError, TypeError):
-        msg = msg[:200]
-    bad(f"{where} 拒绝了请求(HTTP {e.code}):{msg}", "向共享 AI 的那台电脑要「启动局域网共享.bat」窗口里打印的口令(也在它的 dev/ai_share_key.txt),改自己的 dev/ai_remote.json")
-except (OSError, ValueError) as e:
-    if remote.get("server"):
-        bad(f"连不上{where}", "让共享方双击「启动局域网共享.bat」并打开 ComfyUI;两台电脑要在同一个局域网;地址以对方窗口里打印的为准")
-    else:
-        warn("本机没有 ComfyUI", "没有 16GB 以上 NVIDIA 显卡就用同事电脑共享的:把 dev/ai_remote.example.json 复制成 dev/ai_remote.json,"
-             "填上共享方「启动局域网共享.bat」窗口里打印的地址和口令。AI 重绘只是可选功能,工作台其他功能不受影响")
+except (OSError, ValueError):
+    warn("本机 ComfyUI 没在运行(端口 8188)", "装了原作者 U 盘里的 AI 环境包的话,先双击里面的「启动 ComfyUI.bat」,窗口别关,再跑一次自检;"
+         "没装就忽略,AI 重绘只是可选功能")
 if ai_ok and "--smoke" in sys.argv:
+    import time
     from PIL import Image, ImageDraw
     tmp = tempfile.mkdtemp(prefix="budui_smoke_")
     src = os.path.join(tmp, "smoke_card.png")
     im = Image.new("RGBA", (160, 96), (0, 0, 0, 0))
     ImageDraw.Draw(im).rounded_rectangle((4, 4, 155, 91), 22, fill=(255, 205, 40, 255), outline=(20, 20, 20, 255), width=5)
     im.save(src)
-    print("  … 试跑一张重绘(共享 ComfyUI 忙的时候要排队,最多等 15 分钟)")
-    r = subprocess.run([sys.executable, os.path.join(ROOT, "dev", "restyle", "restyle.py"), src, "--out", tmp, "--keep-shape",
+    res = "1024" if vram_gb >= 12 or not gpu else "768"
+    print(f"  … 试跑一张重绘(分辨率 {res};大显存显卡约半分钟,显存小要几分钟,最多等 15 分钟)")
+    t0 = time.time()
+    r = subprocess.run([sys.executable, os.path.join(ROOT, "dev", "restyle", "restyle.py"), src, "--out", tmp, "--keep-shape", "--res", res,
                         "--refs", os.path.join(ROOT, "dev", "restyle", "templates", "style_swatch.png")], capture_output=True, text=True, encoding="utf-8", errors="replace")
     if os.path.exists(os.path.join(tmp, "smoke_card.raw.png")):
-        ok(f"试跑成功,对比图:{os.path.join(tmp, '_compare.png')}")
+        ok(f"试跑成功,用时 {time.time() - t0:.0f} 秒(原作者的 4090 约 25 秒);对比图:{os.path.join(tmp, '_compare.png')}")
+        print("      把用时和对比图发给原作者,一起决定这台电脑上 AI 重绘用不用、用多大分辨率(restyle.py 加 --res 768)")
     else:
-        bad("试跑失败", (r.stdout + r.stderr).strip()[-300:])
+        out = (r.stdout + r.stderr).strip()
+        oom = "out of memory" in out.lower() or "outofmemory" in out.lower()
+        hint = ("爆显存了:先关掉其他占显卡的程序(游戏、浏览器硬件加速等)再试;还不行就说明这张卡跑不动,AI 重绘交给有大显存显卡的电脑做"
+                if oom else "把下面的报错发给原作者")
+        bad("试跑失败", hint + "\n      " + out[-400:])
 
 print("\n[4] Unity(覆盖到 Unity 只需要主工程文件夹;Unity 里截图验收才需要装编辑器)")
 hub = os.path.expandvars(r"%ProgramFiles%\Unity\Hub\Editor\2022.3.32f1\Editor\Unity.exe")
