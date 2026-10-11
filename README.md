@@ -3,7 +3,7 @@
 **本地单文件软件**(零安装零依赖):双击 `BUD_UI_Studio.html` 用 Edge/Chrome 打开即用。
 把 Figma 切图摆成界面、配上动效交互,一键导出 **BUD_CHINA 主工程直接可用的预制体交付包**。
 
-> 第一次在新电脑上用(或把文件夹交给同事):先看 `ONBOARDING.md`,双击 `安装与自检.bat` 检查环境。用 Claude Code 打开本文件夹,对它说「按 ONBOARDING.md 帮我把工作台跑起来」即可。工程文件(`projects/`)和 AI 重绘环境不在 GitHub 仓库里,从原作者的 U 盘拷。
+> 第一次在新电脑上用(或把文件夹交给同事):先看 `ONBOARDING.md`,双击 `安装与自检.bat` 检查环境。用 Claude Code 打开本文件夹,对它说「按 ONBOARDING.md 帮我把工作台跑起来」即可。工程文件(`projects/`)和 AI 重绘的模型不在 GitHub 仓库里:工程文件向原作者要,模型让 Claude 按本机配置下载(见 `ONBOARDING.md`「7. AI 重绘」)。
 
 ## 工作流(三步)
 

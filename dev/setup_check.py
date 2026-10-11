@@ -9,9 +9,9 @@ for _s in (sys.stdout, sys.stderr):
         pass
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MODELS = {"UNETLoader": ("unet_name", "qwen_image_2.1_int8_convrot.safetensors"),
-          "CLIPLoader": ("clip_name", "qwen3vl_8b_int8_convrot.safetensors"),
-          "VAELoader": ("vae_name", "qwen_image_2.1_vae_bf16.safetensors")}
+sys.path.insert(0, os.path.join(ROOT, "dev", "restyle"))
+from models_config import load_models, loader_nodes   # 和 restyle.py 读同一份模型配置
+MODELS = load_models()
 problems, warnings = [], []
 ok = lambda m: print("  ✓ " + m)
 def bad(m, fix):
@@ -74,7 +74,7 @@ if os.path.exists(os.path.join(desktop, "BUD UI Studio.lnk")):
 else:
     warn("桌面还没有「BUD UI Studio」", "双击「创建桌面快捷方式.bat」")
 
-print("\n[3] AI 重绘(可选:本机 ComfyUI + Qwen Image 2.1,环境包从原作者的 U 盘拷)")
+print("\n[3] AI 重绘(可选:本机 ComfyUI + Qwen Image 2.1,按 ONBOARDING「7. AI 重绘」让 Claude 按本机配置装)")
 import ctypes
 class _MEM(ctypes.Structure):
     _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong)] + [(n, ctypes.c_ulonglong) for n in
@@ -90,11 +90,9 @@ if gpu:
     name, mem, drv = [x.strip() for x in gpu[0].split(",")[:3]]
     vram_gb = float(mem) / 1024
     print(f"  · 显卡 {name},显存 {vram_gb:.0f} GB,驱动 {drv};内存 {ram_gb:.0f} GB")
-    if float(drv.split(".")[0]) < 580:
-        bad(f"NVIDIA 驱动太旧({drv})", "AI 环境包里的 PyTorch 基于 CUDA 13,要 580 以上的驱动:到 https://www.nvidia.cn/drivers/ 下载这张显卡的最新驱动,装完重启")
     if vram_gb < 16:
-        warn(f"显存只有 {vram_gb:.0f} GB(模型约 16 GB)", "ComfyUI 会把放不下的部分放在内存里来回搬:能跑但慢,分辨率高了可能爆显存。"
-             "试跑会按显存自动降到 768 分辨率,看耗时和效果再决定用不用")
+        warn(f"显存只有 {vram_gb:.0f} GB(原作者那套 int8 模型约 16 GB)", "选更小的模型版本、缓存放内存(models.local.json 的 cache_device 设 cpu、cache_dtype 设 int8)、"
+             "ComfyUI 加 --lowvram 启动;试跑会自动降到 768 分辨率,看耗时和效果再决定用不用")
     if ram_gb and ram_gb < 32:
         warn(f"内存只有 {ram_gb:.0f} GB", "显存不够时模型要放在内存里,内存最好 32 GB 以上,否则可能卡死或报内存不足")
 else:
@@ -106,23 +104,33 @@ ai_ok = False
 try:
     st = get("/system_stats")
     dev = (st.get("devices") or [{}])[0]
-    ok(f"本机 ComfyUI 在运行:{dev.get('name', '?')}")
+    torch_v = st.get("system", {}).get("pytorch_version", "")
+    ok(f"本机 ComfyUI {st.get('system', {}).get('comfyui_version', '?')} 在运行:{dev.get('name', '?')},PyTorch {torch_v}")
+    cu = int(torch_v.split("+cu")[1][:3]) if "+cu" in torch_v else 0
+    need = 580 if cu >= 130 else 528 if cu >= 120 else 0   # CUDA 13 要 580+ 驱动,CUDA 12 要 528+(Windows)
+    if gpu and need and float(drv.split(".")[0]) < need:
+        bad(f"NVIDIA 驱动 {drv} 太旧,这个 ComfyUI 的 PyTorch(CUDA {cu // 10}.{cu % 10})要 {need} 以上",
+            "到 https://www.nvidia.cn/drivers/ 下载这张显卡的最新驱动装上并重启;或换一个 CUDA 版本更低的 ComfyUI 便携版")
     missing = []
-    for node, (field, fname) in MODELS.items():
-        info = get("/object_info/" + node).get(node, {})
+    for cls, inputs in loader_nodes(MODELS).values():
+        info = get("/object_info/" + cls).get(cls)
+        if not info:
+            missing.append(f"节点 {cls}(用 GGUF 等格式要先装对应的自定义节点)")
+            continue
+        field, fname = next(iter(inputs.items()))
         opts = info.get("input", {}).get("required", {}).get(field, [[]])[0]
         if fname not in opts:
             missing.append(fname)
     if not get("/object_info/TextEncodeQwenImage21"):
-        bad("ComfyUI 太旧,没有 Qwen Image 2.1 节点", "用原作者 U 盘里的 AI 环境包")
+        bad("ComfyUI 太旧,没有 Qwen Image 2.1 节点", "更新到 ComfyUI 0.37 或更新版本")
     elif missing:
-        bad("ComfyUI 缺模型:" + "、".join(missing), "从原作者 U 盘的 AI 环境包里拷,放进 ComfyUI/models 对应目录(diffusion_models / text_encoders / vae);拷完运行环境包里的「校验模型.bat」")
+        bad("ComfyUI 缺:" + "、".join(missing), "让 Claude 按 ONBOARDING.md「7. AI 重绘」按这台电脑的配置下载模型,并把实际文件名写进 dev/restyle/models.local.json")
     else:
-        ok("模型齐全:Qwen Image 2.1 int8、Qwen3-VL 8B 文本编码、VAE")
+        ok(f"模型齐全(按模型配置):{MODELS['diffusion_model']}、{MODELS['text_encoder']}、{MODELS['vae']}")
         ai_ok = True
 except (OSError, ValueError):
-    warn("本机 ComfyUI 没在运行(端口 8188)", "装了原作者 U 盘里的 AI 环境包的话,先双击里面的「启动 ComfyUI.bat」,窗口别关,再跑一次自检;"
-         "没装就忽略,AI 重绘只是可选功能")
+    warn("本机 ComfyUI 没在运行(端口 8188)", "还没装的话,让 Claude 按 ONBOARDING.md「7. AI 重绘」按这台电脑的配置装;装了就先启动 ComfyUI(端口 8188)再跑一次自检。"
+         "AI 重绘只是可选功能,不装不影响工作台其他功能")
 if ai_ok and "--smoke" in sys.argv:
     import time
     from PIL import Image, ImageDraw
@@ -131,7 +139,7 @@ if ai_ok and "--smoke" in sys.argv:
     im = Image.new("RGBA", (160, 96), (0, 0, 0, 0))
     ImageDraw.Draw(im).rounded_rectangle((4, 4, 155, 91), 22, fill=(255, 205, 40, 255), outline=(20, 20, 20, 255), width=5)
     im.save(src)
-    res = "1024" if vram_gb >= 12 or not gpu else "768"
+    res = str(MODELS.get("res", 1024)) if vram_gb >= 12 or not gpu else str(min(int(MODELS.get("res", 1024)), 768))
     print(f"  … 试跑一张重绘(分辨率 {res};大显存显卡约半分钟,显存小要几分钟,最多等 15 分钟)")
     t0 = time.time()
     r = subprocess.run([sys.executable, os.path.join(ROOT, "dev", "restyle", "restyle.py"), src, "--out", tmp, "--keep-shape", "--res", res,

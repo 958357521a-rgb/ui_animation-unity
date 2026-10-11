@@ -8,8 +8,8 @@
 
 1. **拿到工作台**:原作者在 GitHub 上把私有仓库共享给你(邮件里点接受邀请)。装 [GitHub Desktop](https://desktop.github.com/),登录后 File → Clone repository 选这个仓库,放到任意位置(路径里有中文也没关系)。也可以用命令行 `git clone <仓库地址>`。
 2. **双击文件夹里的「安装与自检.bat」**:逐项检查 Python、Pillow、Node.js、浏览器、工作台服务、AI 重绘、Unity,缺什么照提示补(缺 Pillow 会自动装)。没装 Python 时它会告诉你怎么装,装好再双击一次。
-3. **工程数据从 U 盘拷**(仓库里不带工程文件:几十 MB 且含游戏美术资源):把 U 盘里 `projects/` 下的 `.budui.json` 放进你这份文件夹的 `projects/`;原作者导出的「全部任务」文件,在工作台任务首页点「从工程文件导入」选它,任务、素材、动效会原样出现。
-4. **AI 重绘(可选,要实测)**:U 盘里的「AI重绘环境」= ComfyUI + 3 个模型(约 20 GB),按里面的「说明.txt」装到你电脑上,再跑一次「安装与自检.bat」选 Y 试跑一张,把用时和效果发给原作者。你的显卡(RTX 2060)显存比模型小,能不能用、用多大分辨率以实测为准。详见下文「7. AI 重绘」。
+3. **工程数据**:仓库里不带工程文件(几十 MB,含游戏美术资源)。新需求直接在工作台「＋ 新建任务」;要接着做原作者的任务,向原作者要工程文件(`.budui.json`,或任务首页「导出全部任务」得到的文件),放进 `projects/` 后点「载入工程」,或在任务首页「从工程文件导入」。
+4. **AI 重绘(可选)**:对 Claude 说「按 ONBOARDING.md 第 7 节,按我电脑的配置把 AI 重绘环境装好」。它会先查你的显卡、显存、内存、硬盘,挑最合适的模型版本,下载前告诉你要下多大的文件,你同意了才下;装好后试跑一张给你看效果和用时。
 5. **用 Claude Code 打开这个文件夹**(桌面版在 Code 页选择文件夹;命令行版在文件夹里运行 `claude`),对它说:**「按 ONBOARDING.md 帮我把工作台跑起来」**。之后直接用中文说要做什么就行,比如「把 Figma 里新的总览画板导进来」「重新配一下动效」「覆盖到 Unity」。
 
 ## 更新到新版本
@@ -84,7 +84,7 @@ Figma 设计稿 ──导入──▶ 工作台还原图层(文字可编辑,其�
 
 ### 5. 载入工程(新电脑必做)
 
-1. 工程文件不在仓库里(`.gitignore` 排除了 `projects/`),从原作者的 U 盘拷进 `projects/`。有原作者导出的「全部任务」文件就优先导它(任务首页「从工程文件导入」),所有任务一次到位;否则请同事点工具栏「载入工程」→ 选 `projects/Sign.budui.json`(约 33 MB,最新的充值福利,含全部贴图,要等几秒)。系统的选文件窗口 Claude 操作不了。
+1. 工程文件不在仓库里(`.gitignore` 排除了 `projects/`),向原作者要文件放进 `projects/`。有原作者导出的「全部任务」文件就优先导它(任务首页「从工程文件导入」),所有任务一次到位;否则请同事点工具栏「载入工程」→ 选 `projects/Sign.budui.json`(约 33 MB,最新的充值福利,含全部贴图,要等几秒)。系统的选文件窗口 Claude 操作不了。
 2. 载入后会成为一个任务(左上角显示任务名)。以左侧「页面」列表为准,`Sign` 应有 11 页:🏠 05 奖励总览;📄 06 圣天使之翼 / 07 自选特效 / 10 发型 / 11 鞋子(可领取)/ 12 鞋子(已领取)/ 14 自选动作;🗨 04 福利规则 / 08 确认兑换 / 09 兑换成功 / 13 领取成功。模块名框里是 `Sign`。
 3. 之后会自动保存到这个浏览器;同一浏览器、同一地址刷新后会回到上次的任务。
 
@@ -98,9 +98,23 @@ Figma 设计稿 ──导入──▶ 工作台还原图层(文字可编辑,其�
 ### 7. AI 重绘(可选:批量统一旧界面风格)
 
 - 工具:`dev/restyle/restyle.py`(重绘切图)、`dev/restyle/prefab_sprites.py`(列出一个 prefab 用到的全部切图)、`dev/restyle/swap_in_place.py`(把新切图原路径换进主工程:默认只演练,`--apply` 才写,旧图备份到 `backups/<时间>-restyle/`,`--undo` 还原)。做法和踩坑见 `docs/经验与决定.md` 的「AI 重绘」。
-- 需要本机的 ComfyUI + 3 个模型(Qwen Image 2.1 int8、Qwen3-VL 8B 文本编码、VAE,约 16 GB)。原作者把精简过的 ComfyUI 便携版连同这 3 个模型放在 U 盘的「AI重绘环境」里:整个拷到电脑上(建议 `D:\ComfyUI_windows_portable`,别放进工作台文件夹)→「校验模型.bat」→「启动 ComfyUI.bat」(窗口别关)→ 工作台的「安装与自检.bat」选 Y 试跑。`restyle.py` 默认连本机 8188。
-- 硬件:原作者用 RTX 4090(24 GB 显存)每张约 20~30 秒。显存比模型小(比如 6 GB 的 RTX 2060)时,ComfyUI 会把放不下的部分放在内存里来回搬:能跑但慢很多,电脑内存最好 32 GB 以上;爆显存就改用「启动 ComfyUI(显存不够时用).bat」、`restyle.py` 加 `--res 768`。环境包里的 PyTorch 基于 CUDA 13,NVIDIA 驱动要 580 以上(自检会查)。
-- 原作者决定(10-10):不通过原作者电脑共享 AI。实测跑不动的电脑就不做 AI 重绘,这一步交给有大显存显卡的电脑批量做,成品切图经 Figma / U 盘给过去。
+- 这一步由 Claude 按这台电脑的配置来搭,工作台本身不带模型。需要的东西:
+  1. **ComfyUI 0.37 或更新**(要有 Qwen Image 2.1 的节点 `TextEncodeQwenImage21`、`QwenImage21Cache`):Windows 便携版在 https://github.com/comfyanonymous/ComfyUI/releases(选 NVIDIA 版),解压到工作台文件夹以外的地方。端口用 8188,保持默认只听本机(**不要**加 `--listen 0.0.0.0` 开到局域网)。
+  2. **三类模型**,官方来源 https://huggingface.co/Comfy-Org/Qwen-Image-2.1 ,国内网络用 https://modelscope.cn/models/Comfy-Org/Qwen-Image-2.1 (同名仓库,文件一样):主模型放 `ComfyUI/models/diffusion_models/`(`qwen_image_2.1_bf16` 或 `qwen_image_2.1_int8_convrot`)、文本编码放 `text_encoders/`(`qwen3vl_8b_bf16` 或 `qwen3vl_8b_int8_convrot`)、VAE 放 `vae/`(`qwen_image_2.1_vae_bf16`)。原作者用的是 int8 主模型 + int8 文本编码(约 16 GB)。
+- **先查配置再选**:`nvidia-smi`(显卡、显存、驱动版本)、内存、磁盘剩余空间(留 25 GB 以上)。
+
+  | 显存 | 建议 |
+  |---|---|
+  | 24 GB 以上 | int8(原作者配置,RTX 4090 每张 20~30 秒)或 bf16 |
+  | 12~16 GB | int8;`models.local.json` 里 `cache_device` 设 `cpu` |
+  | 6~8 GB(如 RTX 2060) | 先试 int8:ComfyUI 加 `--lowvram` 启动,`models.local.json` 写 `{"cache_device": "cpu", "cache_dtype": "int8", "res": 768}`。太慢或爆显存,再找更小的量化版本(比如 GGUF:要装 ComfyUI-GGUF 自定义节点,`unet_loader` / `clip_loader` 改成 `UnetLoaderGGUF` / `CLIPLoaderGGUF`;原作者电脑上没测过这种组合,装好先跑自检) |
+
+  - 内存最好 32 GB 以上:显存不够时模型放在内存里来回搬。
+  - 驱动下限由 ComfyUI 便携版里 PyTorch 的 CUDA 版本决定(CUDA 13 要 580 以上,CUDA 12 要 528 以上);驱动旧就先升级,或者换 CUDA 版本低一点的便携版。自检会对照着检查。
+  - 20 系显卡(如 2060)不原生支持 bf16,ComfyUI 会自动转换,能用但慢一些。
+  - 下载的东西只从上面的官方地址或可信的作者那里拿。
+- **装好后**:把实际用的文件名、加载节点、缓存设置写进 `dev/restyle/models.local.json`(格式同 `dev/restyle/models.json`,只写要改的项,不进仓库)→ 启动 ComfyUI → 双击「安装与自检.bat」选 Y 试跑一张,把用时和对比图给用户看。`restyle.py` 和自检都按这份配置来。
+- Claude 守则:下载前先告诉用户文件名、来源和大小,用户同意再下(几个 GB 的文件)。原作者决定不跨电脑共享 AI,每台电脑用自己的 ComfyUI。实测跑不动的电脑就不做 AI 重绘,工作台其他功能(导入 Figma、配动效、试玩、覆盖到 Unity)都不需要显卡。
 
 ## 怎么操作这个系统
 
@@ -179,11 +193,12 @@ proj.module = $("#moduleName").value; fetch("/api/save-project?name=" + encodeUR
 | 路径 | 是什么 |
 |---|---|
 | `BUD_UI_Studio.html` | 软件本体(单文件 HTML + JS,零依赖) |
-| `projects/` | 工程文件(含贴图,**不在仓库里**,从 U 盘拷):`Sign.budui.json` = 最新的充值福利(11 页,已覆盖进 207);`GemPack.budui.json` = 钻石页 |
+| `projects/` | 工程文件(含贴图,**不在仓库里**,向原作者要):`Sign.budui.json` = 最新的充值福利(11 页,已覆盖进 207);`GemPack.budui.json` = 钻石页 |
 | `安装与自检.bat`、`dev/setup_check.py` | 新电脑环境自检(选 Y 会试跑一张 AI 重绘) |
 | `dev/restyle/` | AI 重绘工具(见「7. AI 重绘」);`templates/` 是统一风格的参考图 |
 | `docs/经验与决定.md` | 原作者的产品决定和踩坑记录(从原作者的 Claude 记忆整理) |
-| `.gitignore` | 不进仓库的:工程文件、备份、导出物、本机口令 |
+| `dev/restyle/models.json`、`models_config.py` | AI 重绘用哪几个模型、加载节点、缓存设置、默认分辨率(原作者电脑的配置);每台电脑自己的改动写在 `dev/restyle/models.local.json`(不进仓库) |
+| `.gitignore` | 不进仓库的:工程文件、备份、导出物、本机口令、本机模型配置 |
 | `figma-plugin/` | Figma 导出插件(`manifest.json` / `code.js` / `ui.html`)和安装说明 |
 | `dev/studio_server.py` | 本地服务:托管工作台 + `POST /api/save-project` 写回工程 + `POST /api/save-export` 把交付包另存到 `exports/` |
 | `exports/` | 导出时自动生成:交付包 `.unitypackage` 的另存副本(打包交接时不需要带) |

@@ -1,21 +1,25 @@
 # 按模板风格重绘旧 UI 切图(本机 ComfyUI + Qwen Image 2.1,接法照官方模板 image_qwen_image_2_1_image_edit)
 # 用法:python dev/restyle/restyle.py 旧图1.png 旧图2.png ... --out <输出目录> --refs dev/restyle/templates/template_gempack.png dev/restyle/templates/template_sign.png [--keep-shape] [--max-aspect 2.5] [--seed N] [--port 8188]
+# 用哪几个模型、加载节点、缓存放哪、默认分辨率:读 dev/restyle/models.json + 本机的 models.local.json(见 models_config.py)。
 # 模板图 = 207 / 钻石页新稿用主工程字体合成后裁出的内容区(原作者 2026-10-10 指定的统一风格模板)。Python 用真实解释器 %LOCALAPPDATA%\Python\bin\python(PATH 里的 WindowsApps python 是占位程序)。
 # 每张旧图:image_1 = 旧图(输出尺寸跟随它),image_2.. = 模板参考图 → 重绘 → 缩回原尺寸(保留 RGBA)→ <out>/<名字>.png,
 # 再拼一张新旧对比图 <out>/_compare.png。只读旧图,不写主工程。
 import argparse, io, json, os, random, sys, time, uuid, urllib.request
+from models_config import load_models, loader_nodes
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 from PIL import Image
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--out", required=True); ap.add_argument("--refs", nargs="+", required=True)
 ap.add_argument("--seed", type=int, default=20261010); ap.add_argument("--port", default="8188")
-ap.add_argument("--res", type=int, default=1024); ap.add_argument("--steps", type=int, default=25)
+ap.add_argument("--res", type=int, default=None, help="默认用模型配置里的 res"); ap.add_argument("--steps", type=int, default=25)
 ap.add_argument("--prompt", default=None); ap.add_argument("olds", nargs="+")
 ap.add_argument("--max-aspect", type=float, default=2.5, help="长宽比超过它的旧图先补透明边再送进模型,出图后裁回原区域")
 ap.add_argument("--neg", default=None, help="反向提示词(整屏重绘时要去掉 text,否则界面文字会被抹掉)")
 ap.add_argument("--keep-shape", action="store_true", help="新图透明通道 = min(新, 旧):轮廓严格不超出旧图")
 a = ap.parse_args()
+MODELS = load_models()
+RES = a.res or int(MODELS.get("res", 1024))
 BASE = f"http://127.0.0.1:{a.port}"
 os.makedirs(a.out, exist_ok=True)
 
@@ -42,12 +46,13 @@ def upload(path):
     return (r["subfolder"] + "/" + r["name"]) if r.get("subfolder") else r["name"]
 
 def graph(img_names, prompt, seed):
+    ld = loader_nodes(MODELS)
     g = {
-        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": "qwen_image_2.1_int8_convrot.safetensors", "weight_dtype": "default"}},
-        "2": {"class_type": "QwenImage21Cache", "inputs": {"model": ["1", 0], "device": "auto", "dtype": "default"}},
-        "3": {"class_type": "CLIPLoader", "inputs": {"clip_name": "qwen3vl_8b_int8_convrot.safetensors", "type": "qwen_image", "device": "default"}},
-        "4": {"class_type": "VAELoader", "inputs": {"vae_name": "qwen_image_2.1_vae_bf16.safetensors"}},
-        "8": {"class_type": "TextEncodeQwenImage21", "inputs": {"clip": ["3", 0], "vae": ["4", 0], "prompt": prompt, "negative_prompt": NEG, "resolution": a.res}},
+        "1": {"class_type": ld["unet"][0], "inputs": ld["unet"][1]},
+        "2": {"class_type": "QwenImage21Cache", "inputs": {"model": ["1", 0], "device": MODELS.get("cache_device", "auto"), "dtype": MODELS.get("cache_dtype", "default")}},
+        "3": {"class_type": ld["clip"][0], "inputs": ld["clip"][1]},
+        "4": {"class_type": ld["vae"][0], "inputs": ld["vae"][1]},
+        "8": {"class_type": "TextEncodeQwenImage21", "inputs": {"clip": ["3", 0], "vae": ["4", 0], "prompt": prompt, "negative_prompt": NEG, "resolution": RES}},
         "9": {"class_type": "KSampler", "inputs": {"model": ["2", 0], "positive": ["8", 0], "negative": ["8", 1], "latent_image": ["8", 2],
               "seed": seed, "steps": a.steps, "cfg": 1, "sampler_name": "euler", "scheduler": "simple", "denoise": 1}},
         "10": {"class_type": "VAEDecode", "inputs": {"samples": ["9", 0], "vae": ["4", 0]}},

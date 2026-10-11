@@ -1,0 +1,11 @@
+{
+  "_说明": "AI 重绘用的模型配置。这里是原作者电脑(RTX 4090 24GB)的配置;别的电脑把要改的项写进同目录的 models.local.json(不进仓库,没写的项沿用这里)。模型来源:https://huggingface.co/Comfy-Org/Qwen-Image-2.1 ,国内网络用 https://modelscope.cn/models/Comfy-Org/Qwen-Image-2.1 。怎么按本机配置选见 ONBOARDING.md「7. AI 重绘」",
+  "diffusion_model": "qwen_image_2.1_int8_convrot.safetensors",
+  "text_encoder": "qwen3vl_8b_int8_convrot.safetensors",
+  "vae": "qwen_image_2.1_vae_bf16.safetensors",
+  "unet_loader": "UNETLoader",
+  "clip_loader": "CLIPLoader",
+  "cache_device": "auto",
+  "cache_dtype": "default",
+  "res": 1024
+}
