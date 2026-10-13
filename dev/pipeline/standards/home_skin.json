@@ -1,0 +1,99 @@
+{
+  "_说明": "主页皮肤(ProfileTheme):按主工程 2026-10-13 的现状(参照 45 号「桂月栖兔」)。设计稿画框 = 2436×1125 全屏。Arts/UI/Themes/Theme_<id>/:bg.png(全屏背景)、装饰 Image_XX(按位置分到左上 / 左下锚点组,一个 Animator 动全部装饰)、底栏 Image_Bottom0 / 1、卡片框 Frame0<k>_Top / _Bottom → Bg1~5.prefab、ThemeBg.prefab;Loadable/UI/Themes/Theme_<id>/ 下各 prefab 的壳 + 预览 ThemeBg<id>/ThemeBg<id>.prefab(底栏换成合成效果图 Image_UP)。缩略图 theme_icon_<id>(300×300,进 ProfileTheme 图集)。配置 ProfileThemeConfig.json 的 configs 数组。",
+  "_角色说明": "背景铺满全屏;装饰按位置自动分到左上 / 左下组(只有装饰的动效会导出);卡片 1~5 对应个人页的五种卡片(1 资料卡、2 穿戴卡、3 账号 / 动作 / 衣橱卡、4 统计卡、5 创作者赛季卡),各有「头部」「主体」两张框图,可再放一个「位置」框定卡片范围(不导出);合成效果图只给预览面板用",
+  "id": "home_skin",
+  "name": "主页皮肤",
+  "order": 5,
+  "builder": "home_skin",
+  "idFrom": "(\\d+)\\s*$",
+  "idHint": "主页皮肤_46",
+  "astc": ["Android", "iPhone"],
+  "roles": {
+    "bg":         {"label": "背景(全屏)", "match": "^(背景|bg$|bg[_ ]|底图)", "size": [2436, 1125],
+                   "path": "Assets/Arts/UI/Themes/Theme_{id}/bg.png"},
+    "bottom2":    {"label": "底栏上层", "match": "^(底栏上层|底栏2|bottom1|bottom2|bottom_1|bottom_2)$",
+                   "path": "Assets/Arts/UI/Themes/Theme_{id}/Image_Bottom1.png"},
+    "bottom":     {"label": "底栏", "match": "^(底栏|bottom|bottom0|bottom_0|image_bottom)$",
+                   "path": "Assets/Arts/UI/Themes/Theme_{id}/Image_Bottom0.png"},
+    "card1_top":  {"label": "卡片1 头部", "match": "^(卡片1|card1|bg1|frame0?1).*(头|顶|top)", "path": "Assets/Arts/UI/Themes/Theme_{id}/Frame01_Top.png"},
+    "card1_body": {"label": "卡片1 主体", "match": "^(卡片1|card1|bg1|frame0?1).*(主体|身|body|bottom)", "path": "Assets/Arts/UI/Themes/Theme_{id}/Frame01_Bottom.png"},
+    "card1_slot": {"label": "卡片1 位置(不导出)", "match": "^(卡片1|card1|bg1).*(位置|slot|占位)", "placeOnly": true, "stage": false},
+    "card2_top":  {"label": "卡片2 头部", "match": "^(卡片2|card2|bg2|frame0?2).*(头|顶|top)", "path": "Assets/Arts/UI/Themes/Theme_{id}/Frame02_Top.png"},
+    "card2_body": {"label": "卡片2 主体", "match": "^(卡片2|card2|bg2|frame0?2).*(主体|身|body|bottom)", "path": "Assets/Arts/UI/Themes/Theme_{id}/Frame02_Bottom.png"},
+    "card2_slot": {"label": "卡片2 位置(不导出)", "match": "^(卡片2|card2|bg2).*(位置|slot|占位)", "placeOnly": true, "stage": false},
+    "card3_top":  {"label": "卡片3 头部", "match": "^(卡片3|card3|bg3|frame0?3).*(头|顶|top)", "path": "Assets/Arts/UI/Themes/Theme_{id}/Frame03_Top.png"},
+    "card3_body": {"label": "卡片3 主体", "match": "^(卡片3|card3|bg3|frame0?3).*(主体|身|body|bottom)", "path": "Assets/Arts/UI/Themes/Theme_{id}/Frame03_Bottom.png"},
+    "card3_slot": {"label": "卡片3 位置(不导出)", "match": "^(卡片3|card3|bg3).*(位置|slot|占位)", "placeOnly": true, "stage": false},
+    "card4_top":  {"label": "卡片4 头部", "match": "^(卡片4|card4|bg4|frame0?4).*(头|顶|top)", "path": "Assets/Arts/UI/Themes/Theme_{id}/Frame04_Top.png"},
+    "card4_body": {"label": "卡片4 主体", "match": "^(卡片4|card4|bg4|frame0?4).*(主体|身|body|bottom)", "path": "Assets/Arts/UI/Themes/Theme_{id}/Frame04_Bottom.png"},
+    "card4_slot": {"label": "卡片4 位置(不导出)", "match": "^(卡片4|card4|bg4).*(位置|slot|占位)", "placeOnly": true, "stage": false},
+    "card5_top":  {"label": "卡片5 头部", "match": "^(卡片5|card5|bg5|frame0?5).*(头|顶|top)", "path": "Assets/Arts/UI/Themes/Theme_{id}/Frame05_Top.png"},
+    "card5_body": {"label": "卡片5 主体", "match": "^(卡片5|card5|bg5|frame0?5).*(主体|身|body|bottom)", "path": "Assets/Arts/UI/Themes/Theme_{id}/Frame05_Bottom.png"},
+    "card5_slot": {"label": "卡片5 位置(不导出)", "match": "^(卡片5|card5|bg5).*(位置|slot|占位)", "placeOnly": true, "stage": false},
+    "composite":  {"label": "合成效果图(预览用)", "match": "^(合成|效果图|image_up|up$)", "stage": false, "size": [2436, 1125],
+                   "path": "Assets/Arts/UI/Themes/Theme_{id}/Image_UP.png"},
+    "icon":       {"label": "缩略图", "match": "^(缩略图|图标|icon)", "stage": false, "size": [300, 300],
+                   "path": "Assets/Arts/UI/UIPanel/ProfileTheme/Textures/theme_icon_{id}.png"},
+    "deco_up":    {"label": "装饰 · 左上组", "match": "^(左上|上_|up_)", "deco": "up"},
+    "deco_down":  {"label": "装饰 · 左下组", "match": "^(左下|下_|down_)", "deco": "down"},
+    "deco":       {"label": "装饰 · 按位置自动", "default": true, "deco": "auto"},
+    "skip":       {"label": "不导出", "match": "^(参考|ref|_)"}
+  },
+  "dirs": {
+    "arts":     "Assets/Arts/UI/Themes/Theme_{id}",
+    "loadable": "Assets/Loadable/UI/Themes/Theme_{id}"
+  },
+  "refs": {
+    "_说明": "全屏背景用主工程的 SizeToFitBgView(Assets/Arts/UI/UIPanel/SignIn/SizeToFitBgView.prefab)嵌套实例,下面是它的 GUID 和要改的对象 fileID(对照 Theme_45/ThemeBg.prefab)",
+    "sizeToFitBgView": {"guid": "a8a7f613b75754a2482d29704e24e840", "root_rt": "5096604675049300388", "root_go": "7217213979216784653",
+                        "raw_image": "3588125075047820582", "image_rt": "8395370191809243422"}
+  },
+  "cardSizes": {"_说明": "没放「卡片 k 位置」时 Bg<k> 根节点的尺寸(Theme_45 的壳)", "1": [896, 862], "2": [652, 862], "3": [1210, 862], "4": [1210, 862], "5": [349, 865]},
+  "exists": ["Assets/Arts/UI/Themes/Theme_{id}", "Assets/Loadable/UI/Themes/Theme_{id}", "Assets/Arts/UI/UIPanel/ProfileTheme/Textures/theme_icon_{id}.png"],
+  "required": ["bg", "icon"],
+  "recommended": ["bottom", "composite", "card1_body", "card2_body", "card3_body", "card4_body", "card5_body"],
+  "recommendedNote": {"composite": ":预览面板会用底栏代替", "card1_body": ":Bg1 会是空的(卡片背景透明)", "card2_body": ":Bg2 会是空的", "card3_body": ":Bg3 会是空的", "card4_body": ":Bg4 会是空的", "card5_body": ":Bg5 会是空的"},
+  "fields": [
+    {"key": "title", "label": "名称(玩家看到的)", "type": "text", "default": "", "required": true},
+    {"key": "previewTitle", "label": "预览面板文案(可用 <color>)", "type": "text", "default": ""},
+    {"key": "textColor", "label": "卡片文字颜色", "type": "color", "default": "#000000"},
+    {"key": "textBorderColor", "label": "卡片文字描边", "type": "color", "default": "#FFFFFF"},
+    {"key": "titleInfoColor", "label": "称号信息底色", "type": "color", "default": "#FFCFDD"},
+    {"key": "gridColor", "label": "格子颜色", "type": "color", "default": "#FFEAB8"},
+    {"key": "priceColor", "label": "价格颜色", "type": "color", "default": "#FFCFDD"},
+    {"key": "mainBgColor", "label": "页面底色(相机)", "type": "color", "default": "#FFF7CB"},
+    {"key": "cardSubColor", "label": "游戏内卡片副色", "type": "color", "default": "#FFF8DC"},
+    {"key": "placeHolderColor", "label": "占位色", "type": "color", "default": "#CCB47C"},
+    {"key": "titleBgColor", "label": "标题底色(带透明度)", "type": "text", "default": "#F0836C00"},
+    {"key": "profileCardColor", "label": "资料卡底色(带透明度)", "type": "text", "default": "#F0836C00"}
+  ],
+  "config": {
+    "file": "Assets/Loadable/UI/UIPanel/ProfileTheme/ProfileThemeConfig.json",
+    "howto": "交付包不会改已有的配置文件(避免覆盖别人同时加的条目)。ProfileThemeConfig.json 的结构是 {\"configs\": [...]},把下面的条目加进 configs 数组末尾:",
+    "entry": {"themeId": "{id:int}", "pgcId": "{id+150100000}", "themeName": "{f:title}", "previewTitle": "{f:previewTitle}", "title": "{f:title}",
+              "colorInfo": {"titleBgColor": "{f:titleBgColor}", "profileCardColor": "{f:profileCardColor}", "mainBgColor": "{f:mainBgColor}",
+                            "cardSubColor": "{f:cardSubColor}", "placeHolderColor": "{f:placeHolderColor}", "textColor": "{f:textColor}",
+                            "textBorderColor": "{f:textBorderColor}", "gridColor": "{f:gridColor}", "priceColor": "{f:priceColor}",
+                            "titleInfoColor": "{f:titleInfoColor}",
+                            "info_bg1": "Assets/Loadable/UI/Themes/Theme_{id}/Bg1.prefab", "info_bg2": "Assets/Loadable/UI/Themes/Theme_{id}/Bg2.prefab",
+                            "info_bg3": "Assets/Loadable/UI/Themes/Theme_{id}/Bg3.prefab", "info_bg4": "Assets/Loadable/UI/Themes/Theme_{id}/Bg4.prefab",
+                            "info_bg5": "Assets/Loadable/UI/Themes/Theme_{id}/Bg5.prefab"},
+              "localPath": "Assets/Loadable/UI/Themes/Theme_{id}/ThemeBg{id}/ThemeBg{id}.prefab"}
+  },
+  "afterImport": [
+    "缩略图进 ProfileTheme 图集(Textures 文件夹):Unity 打开后图集会重新打包,.spriteatlas 的变化一起提交。",
+    "背景 / 合成效果图 2436 宽,超过 2048 上限,构建时会被缩小(主工程现有皮肤也是这样)。",
+    "可选:在 ProfileThemeConfig.cs 的枚举 ProfileTheme 里加一项(只做注释用)。pgcId 按 1501000NN 推的,和服务端 / 策划确认一下。"
+  ],
+  "rules": {
+    "requireAlpha": false,
+    "keepInputSize": true,
+    "maxBytes": 6291456,
+    "maxOutlineGrowth": 0.002
+  },
+  "ai": {
+    "refs": ["dev/restyle/templates/style_swatch.png"],
+    "prompt": "dev/restyle/prompts/切图_保主色.txt",
+    "keepShape": true
+  }
+}

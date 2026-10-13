@@ -122,6 +122,14 @@
   #taskHome.on{display:flex}
   .th-hd{display:flex;align-items:center;gap:10px;padding:12px 22px;background:var(--panel);border-bottom:1px solid var(--line);flex:none}
   .th-hd input{width:220px}
+  .th-main{display:flex;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:3px;gap:2px;flex:none}
+  .th-main button{border:none;background:none;color:var(--dim);font-weight:600;padding:5px 16px}
+  .th-main button.on{background:var(--acc);color:#fff}
+  .th-tools{display:none;flex:1;align-items:center;gap:10px;min-width:0;padding-left:12px;border-left:1px solid var(--line)}
+  .th-tools.on{display:flex}
+  .th-note{color:var(--dim);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  #taskHome [data-tab]:not(.on){display:none}
+  #pipeFrame{flex:1;border:0;width:100%;min-height:0;background:var(--bg)}
   .th-tabs{display:flex;gap:4px} .th-tabs button{border-color:transparent;background:none;color:var(--dim)} .th-tabs button.on{background:var(--panel2);border-color:var(--line);color:var(--ink)}
   .th-grid{flex:1;overflow:auto;padding:20px 22px 40px;display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:16px;align-content:start}
   .tcard{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;display:flex;flex-direction:column}
@@ -163,6 +171,10 @@
 <div id="topbar">
   <div class="tbrow">
     <span class="logo">BUD UI Studio</span>
+    <div class="th-main" title="两条管线:各自的功能按钮只在自己的页签里显示">
+      <button class="on" title="界面改版:Figma 界面 → 摆布局、配动效 → 交付包 / 覆盖到 Unity">界面改版</button>
+      <button onclick="openPipeline()" title="批量处理头像框等切好图的资源:从 Figma 插件收切图 → AI 重绘 → 规则检查 → 配晃动 / 变色等动效 → 生成 unitypackage / 放回 Figma">资源批处理</button>
+    </div>
     <button id="taskBtn" onclick="showTaskHome()" title="任务管理:每个改版任务单独一份工程(素材、动效、覆盖目标),在这里新建 / 切换 / 整理"><span>▦</span><span class="tn">任务</span><span style="color:var(--dim)">▾</span></button>
     <button onclick="newTaskDialog()" title="新建一个改版任务:空白画布,再导入这个任务的素材">＋ 新建任务</button>
     <span class="chip"><b>①</b> 从 Figma 获取</span>
@@ -193,7 +205,6 @@
     <span class="chip"><b>③</b></span>
     <button class="primary" onclick="exportPackage()">导出交付包</button>
     <button class="primary" onclick="openUnityOverwrite()" title="把本模块直接写进 Unity 主工程,覆盖指定的 prefab:沿用主工程里已有的 GUID 和节点 ID,引用不断;覆盖前体检并自动备份旧文件">覆盖到 Unity</button>
-    <button onclick="window.open('pipeline.html', '_blank')" title="批量处理头像框等切好图的资源:从 Figma 插件收切图 → AI 重绘 → 规则检查 → 配晃动 / 变色等动效 → 生成 unitypackage / 放回 Figma">资源批处理</button>
   </div>
 </div>
 <div id="main">
@@ -226,17 +237,32 @@
 </div>
 <div id="taskHome">
   <div class="th-hd">
-    <span class="logo" style="font-weight:800;color:var(--acc)">BUD UI Studio</span><span style="font-weight:700">· 任务</span>
-    <div class="th-tabs" id="taskTabs"></div>
-    <span style="flex:1"></span>
-    <input id="taskSearch" placeholder="搜索任务名 / 模块名 / 备注" oninput="renderTaskHome()">
-    <button id="sharedProjBtn" onclick="loadSharedProject()" title="直接从服务那台电脑的 projects/ 文件夹选一个工程,加成新任务(局域网链接打开时也能用)">从共享文件夹载入</button>
-    <button onclick="importProjectAsTask()" title="把 .budui.json 工程文件(同事发来的、projects/ 文件夹里的、「导出全部任务」得到的)加进来成为任务">从工程文件导入</button>
-    <button onclick="exportAllTasks()" title="把全部任务(含贴图)存成一个文件:整体备份,或搬到另一个浏览器 / 另一台电脑后用「从工程文件导入」一次导回">导出全部任务</button>
-    <button class="primary" onclick="newTaskDialog()">＋ 新建任务</button>
-    <button id="taskHomeClose" onclick="hideTaskHome()" title="回到当前任务(Esc)">返回当前任务</button>
+    <span class="logo" style="font-weight:800;color:var(--acc)">BUD UI Studio</span>
+    <div class="th-main">
+      <button data-k="ui" onclick="goUiLane()" title="界面改版任务:Figma 界面 → 摆布局、配动效 → 交付包 / 覆盖到 Unity">界面改版</button>
+      <button data-k="pipe" onclick="setHomeTab('pipe')" title="批量处理头像框等切好图的资源:从 Figma 插件收切图 → AI 重绘 → 规则检查 → 配晃动 / 变色等动效 → 生成 unitypackage / 放回 Figma">资源批处理</button>
+    </div>
+    <div class="th-tools" data-tab="ui">
+      <div class="th-tabs" id="taskTabs"></div>
+      <span style="flex:1"></span>
+      <input id="taskSearch" placeholder="搜索任务名 / 模块名 / 备注" oninput="renderTaskHome()">
+      <button id="sharedProjBtn" onclick="loadSharedProject()" title="直接从服务那台电脑的 projects/ 文件夹选一个工程,加成新任务(局域网链接打开时也能用)">从共享文件夹载入</button>
+      <button onclick="importProjectAsTask()" title="把 .budui.json 工程文件(同事发来的、projects/ 文件夹里的、「导出全部任务」得到的)加进来成为任务">从工程文件导入</button>
+      <button onclick="exportAllTasks()" title="把全部任务(含贴图)存成一个文件:整体备份,或搬到另一个浏览器 / 另一台电脑后用「从工程文件导入」一次导回">导出全部任务</button>
+      <button class="primary" onclick="newTaskDialog()">＋ 新建任务</button>
+      <button id="taskHomeClose" onclick="hideTaskHome()" title="回到当前任务(Esc)">返回当前任务</button>
+    </div>
+    <div class="th-tools" data-tab="pipe">
+      <span class="th-note">Figma 切图 → AI 重绘 → 规则检查 → 配动效 → unitypackage / 放回 Figma</span>
+      <span style="flex:1"></span>
+      <span class="chip" id="pipeKey" onclick="copyPipeKey()" style="cursor:pointer" title="Figma 插件「资源批处理」里填这个配对码;点一下复制">配对码 <b>…</b></span>
+      <span class="chip">主工程</span><input id="pipeRoot" style="width:260px" placeholder="E:\BUDGCB\BUD_CHINA(含 Assets 的那层)">
+      <button onclick="pipeSend({budui: 'pipe-saveRoot', value: $('#pipeRoot').value})">保存</button>
+      <button onclick="pipeSend({budui: 'pipe-reload'})" title="重新读取批处理任务列表和本地服务状态">刷新</button>
+    </div>
   </div>
-  <div class="th-grid" id="taskGrid"></div>
+  <div class="th-grid" id="taskGrid" data-tab="ui"></div>
+  <iframe id="pipeFrame" data-tab="pipe" title="资源批处理"></iframe>
 </div>
 <input type="file" id="fileSlices" accept="image/png" multiple hidden>
 <input type="file" id="fileRef" accept="image/*" hidden>
@@ -633,7 +659,7 @@ let panning = false, psx=0, psy=0;
 $("#stageWrap").addEventListener("mousedown", e=>{ if (e.target.closest(".node")) return; panning=true; psx=e.clientX-panX; psy=e.clientY-panY; });
 addEventListener("mousemove", e=>{ if (panning){ panX=e.clientX-psx; panY=e.clientY-psy; applyStageTransform(); } });
 addEventListener("mouseup", ()=>panning=false);
-addEventListener("keydown", e=>{ if ($("#taskHome").classList.contains("on")){ if (e.key === "Escape" && !document.querySelector("dialog[open]")) hideTaskHome(); return; }
+addEventListener("keydown", e=>{ if ($("#taskHome").classList.contains("on")){ if (e.key === "Escape" && homeTab === "ui" && !document.querySelector("dialog[open]")) hideTaskHome(); return; }
   if (playing){ if (e.key === "Escape") togglePlay(false); return; }
   if (e.target.tagName==="INPUT"||e.target.tagName==="TEXTAREA") return;
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z"){ e.preventDefault(); return undo(); }
@@ -1460,13 +1486,43 @@ async function migrateLegacyProject(){
 }
 
 /* ---- 任务首页:新建 / 切换 / 整理 ---- */
-async function showTaskHome(){
+async function showTaskHome(tab){
+  if ((tab || "ui") === "ui") uiView = "home";   // 主动打开任务首页 = 界面改版停在任务卡片
   await saveNow(); await loadTaskList();
-  $("#taskHome").classList.add("on"); renderTaskHome();
+  $("#taskHome").classList.add("on"); setHomeTab(tab || "ui"); renderTaskHome(); saveView();
   if (curTask && !taskReadonly && projStats(proj).nodes){ clearTimeout(thumbTimer); saveThumb(curTask); }   // 卡片上的当前任务用最新画面
 }
-function hideTaskHome(){ const m = taskMeta(curTask); if (m && !m.deleted) $("#taskHome").classList.remove("on"); }
+function hideTaskHome(){ const m = taskMeta(curTask); if (m && !m.deleted){ $("#taskHome").classList.remove("on"); uiView = "editor"; } saveView(); }
+// 两条管线的页签常驻(编辑界面顶栏 + 任务首页顶栏):点「界面改版」回到离开前在界面改版里的位置(编辑界面或任务卡片)
+let uiView = "editor";
+function goUiLane(){
+  const m = taskMeta(curTask);
+  if (uiView === "editor" && m && !m.deleted) return hideTaskHome();
+  setHomeTab("ui"); renderTaskHome();
+}
+// 刷新(Ctrl+R)停在当前界面:记下在编辑界面还是任务首页、哪个页签、批处理里打开的哪个任务(每个窗口各记各的)
+function saveView(){ ssSet("budui_view", JSON.stringify({home: $("#taskHome").classList.contains("on"), tab: homeTab, job: pipeJob || "", ui: uiView})); }
+function readView(){ try { return JSON.parse(ssGet("budui_view") || "null"); } catch (e) { return null; } }
 const fmtTime = ts => { if (!ts) return ""; const d = new Date(ts), p = n => String(n).padStart(2, "0"); return (d.getFullYear() !== new Date().getFullYear() ? d.getFullYear() + "年" : "") + `${d.getMonth() + 1}月${d.getDate()}日 ${p(d.getHours())}:${p(d.getMinutes())}`; };
+// 任务首页两个页签:界面改版(任务卡片)/ 资源批处理(pipeline.html 内嵌,只加载一次,切走再切回状态不丢)。
+// 批处理的配对码和主工程路径显示在首页顶栏,与内嵌页靠 postMessage 来回(file:// 下父子页面互相读不到 DOM)
+let homeTab = "ui", pipeInfo = null, pipeJob = "";
+function setHomeTab(k){
+  homeTab = k;
+  document.querySelectorAll("#taskHome .th-main button").forEach(b => b.classList.toggle("on", b.dataset.k === k));
+  document.querySelectorAll("#taskHome [data-tab]").forEach(e => e.classList.toggle("on", e.dataset.tab === k));
+  const f = $("#pipeFrame"); if (k === "pipe" && !f.getAttribute("src")) f.src = "pipeline.html?embed=1" + (pipeJob ? "&job=" + encodeURIComponent(pipeJob) : "");
+  saveView();
+}
+async function openPipeline(){ await showTaskHome("pipe"); }
+const pipeSend = msg => { const f = $("#pipeFrame"); if (f.contentWindow && f.getAttribute("src")) f.contentWindow.postMessage(msg, "*"); };
+function copyPipeKey(){ if (pipeInfo && pipeInfo.key) navigator.clipboard.writeText(pipeInfo.key).then(() => toast("配对码已复制,填进 Figma 插件「资源批处理」")); }
+addEventListener("message", e => {
+  const d = e.data; if (!d || d.budui !== "pipe-info" || e.source !== $("#pipeFrame").contentWindow) return;
+  pipeInfo = d; $("#pipeKey b").textContent = d.key || "…";
+  if ("job" in d){ pipeJob = d.job || ""; saveView(); }
+  if (document.activeElement !== $("#pipeRoot")) $("#pipeRoot").value = d.unityRoot || "";
+});
 function renderTaskHome(){
   const esc = escHtml, kw = $("#taskSearch").value.trim().toLowerCase(), live = taskList.filter(t => !t.deleted);
   const groups = {doing: live.filter(t => t.status !== "done"), done: live.filter(t => t.status === "done"), all: live, trash: taskList.filter(t => t.deleted)};
@@ -1693,6 +1749,8 @@ addEventListener("load", async () => {
   if (!id){ const live = taskList.filter(t => !t.deleted).sort((a, b) => (b.updated || 0) - (a.updated || 0)); id = live.length ? live[0].id : (await createTask({name: "未命名任务", module: ""})).id; }
   applyTask(id, await readTask(id));
   if (location.hash === "#handoff-export" || location.hash === "#handoff-import") return runHandoff(location.hash.slice(9));
+  const view = readView();
+  if (view && view.home){ pipeJob = view.job || ""; await showTaskHome(view.tab === "pipe" ? "pipe" : "ui"); uiView = view.ui === "home" ? "home" : uiView; return saveView(); }   // 刷新前在任务首页 / 资源批处理:回到原处
   const m = taskMeta(id); if (m && projStats(proj).nodes) toast(`已打开任务「${m.name}」;点左上角的任务名可以切换、新建、管理任务`, 5000);
 });
 addEventListener("resize", ()=>fitStage());

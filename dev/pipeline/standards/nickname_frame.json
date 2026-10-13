@@ -1,0 +1,62 @@
+{
+  "_说明": "昵称框:按主工程 2026-10-13 的现状(参照 19 号「苗笙寄韵」)。全部放在 Loadable:图标 Nickname/Icon/NicknameIcon<id>.png(标准 447×130);Prefab/Nickname<id>/ 下 Nickname<id>.prefab + Image.png(框图,和图标同一张);Preview/NicknamePreview<id>/ 下预览 prefab + Image.png(预览底图)。有部件时加在框图上面,配了动效就在根节点挂 Animator。配置 NicknameConfig.json。",
+  "_角色说明": "图标就是昵称框本身(同时做成 prefab 里的框图);预览底图只在预览面板里用;部件叠在框上,只有部件的动效会导出",
+  "id": "nickname_frame",
+  "name": "昵称框",
+  "order": 4,
+  "builder": "nickname",
+  "idFrom": "(\\d+)\\s*$",
+  "idHint": "昵称框_20",
+  "astc": ["Android", "iPhone"],
+  "roles": {
+    "icon":      {"label": "框图 / 图标", "match": "^(图标|icon|框|frame|底)", "size": [447, 130],
+                  "path": ["Assets/Loadable/UI/UIWidgets/Nickname/Icon/NicknameIcon{id}.png",
+                           "Assets/Loadable/UI/UIWidgets/Nickname/Prefab/Nickname{id}/Image.png"]},
+    "previewBg": {"label": "预览底图", "match": "^(预览|preview)", "stage": false},
+    "part":      {"label": "部件(叠在框上)", "default": true, "motion": true},
+    "skip":      {"label": "不导出", "match": "^(参考|ref|_)"}
+  },
+  "dirs": {
+    "prefab":  "Assets/Loadable/UI/UIWidgets/Nickname/Prefab/Nickname{id}",
+    "preview": "Assets/Loadable/UI/UIWidgets/Nickname/Preview/NicknamePreview{id}"
+  },
+  "refs": {
+    "_说明": "预览 prefab 里沿用主工程的东西:头像占位图 Preview/Mask group.png、字体 思源黑体 Heavy(工作台白名单字体)",
+    "avatarPlaceholder": "cd683830507e42e4582ff721fde66026",
+    "font": "2d1f06229702c49f6a7d8597bb583434",
+    "sampleText": "一二三四五六七"
+  },
+  "exists": ["Assets/Loadable/UI/UIWidgets/Nickname/Icon/NicknameIcon{id}.png", "Assets/Loadable/UI/UIWidgets/Nickname/Prefab/Nickname{id}"],
+  "required": ["icon"],
+  "recommended": ["previewBg"],
+  "recommendedNote": {"previewBg": ":预览里会用框图放大代替"},
+  "fields": [
+    {"key": "title", "label": "名称(玩家看到的)", "type": "text", "default": "", "required": true},
+    {"key": "desc", "label": "获取途径说明", "type": "text", "default": ""},
+    {"key": "nameColor", "label": "昵称文字颜色", "type": "color", "default": "#B8663B"},
+    {"key": "nameOutlineColor", "label": "昵称描边颜色(可空)", "type": "text", "default": ""}
+  ],
+  "config": {
+    "file": "Assets/Loadable/UI/UIWidgets/Nickname/NicknameConfig.json",
+    "entry": {"Id": "{id:int}", "PgcId": "{id+180100000}", "Name": "{f:title}", "NameColor": "{f:nameColor}", "NameOutlineColor": "{f:nameOutlineColor}",
+              "SpriteName": "NicknameIcon{id}", "Title": "{f:title}", "Desc": "{f:desc}",
+              "Icon": "Assets/Loadable/UI/UIWidgets/Nickname/Icon/NicknameIcon{id}.png",
+              "Prefab": "Assets/Loadable/UI/UIWidgets/Nickname/Prefab/Nickname{id}/Nickname{id}.prefab",
+              "PreviewPath": "Assets/Loadable/UI/UIWidgets/Nickname/Preview/NicknamePreview{id}/NicknamePreview{id}.prefab"}
+  },
+  "afterImport": [
+    "图标进 Nickname/UserNickNameView 图集:Unity 打开后图集会重新打包,.spriteatlas 的变化一起提交。",
+    "PgcId 按现有号段 1801000NN 推的,和服务端 / 策划确认一下。"
+  ],
+  "rules": {
+    "requireAlpha": true,
+    "keepInputSize": true,
+    "maxBytes": 1048576,
+    "maxOutlineGrowth": 0.002
+  },
+  "ai": {
+    "refs": ["dev/restyle/templates/style_swatch.png"],
+    "prompt": "dev/restyle/prompts/切图_保主色.txt",
+    "keepShape": true
+  }
+}

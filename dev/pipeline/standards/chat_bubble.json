@@ -1,0 +1,75 @@
+{
+  "_说明": "聊天气泡框:按主工程 2026-10-13 的现状(参照 38 号「巫灵夜游会」)。底图九宫格,同一张图放两份:大厅 / 好友聊天用 HallChatBubble_<id>(进 UserInfoBubbleView 图集),3D 头顶气泡用 GameChatBubble_<id>(Loadable,按路径加载);图标 ChatBubbleIcon_<id>;更换面板预览 ShowBubble_<id> 可选(没有就用大厅底图)。角饰 = 每个角一个 UGUI 版 + 一个 _Game 版 prefab(Arts 源 + Loadable 壳 + Animator),配置 ChatBubbleConfig.json。",
+  "_角色说明": "气泡底图要填九宫格边距;角饰按位置自动归到最近的角(也可以手动指定),每个角合成一个带动画的角饰 prefab,只有角饰的动效会导出",
+  "id": "chat_bubble",
+  "name": "聊天气泡框",
+  "order": 2,
+  "builder": "chat_bubble",
+  "idFrom": "(\\d+)\\s*$",
+  "idHint": "聊天气泡_39",
+  "astc": ["Android", "iPhone"],
+  "roles": {
+    "bubble": {"label": "气泡底图(九宫格)", "match": "^(底图|气泡|bubble|hall|game)", "border": true,
+               "path": ["Assets/Arts/UI/UIWidgets/UserInfoView/Textures/CreatorBubbles/HallChatBubble_{id}.png",
+                        "Assets/Loadable/UI/UIWidgets/CreatorBubbles/GameChatBubble_{id}.png"]},
+    "icon":   {"label": "图标", "match": "^(图标|icon)", "stage": false, "size": [195, 133],
+               "path": "Assets/Arts/UI/UIWidgets/UserInfoView/Textures/CreatorBubbles/ChatBubbleIcon_{id}.png"},
+    "show":   {"label": "更换面板预览(九宫格)", "match": "^(预览|展示|show)", "border": true, "stage": false,
+               "path": "Assets/Arts/UI/UIWidgets/UserInfoView/Textures/CreatorBubbles/ShowBubble_{id}.png"},
+    "lu":     {"label": "角饰 · 左上", "match": "^(左上|leftup|topleft|lu[_ ])", "corner": "lu"},
+    "ru":     {"label": "角饰 · 右上", "match": "^(右上|rightup|topright|ru[_ ])", "corner": "ru"},
+    "ld":     {"label": "角饰 · 左下", "match": "^(左下|leftdown|bottomleft|ld[_ ])", "corner": "ld"},
+    "rd":     {"label": "角饰 · 右下", "match": "^(右下|rightdown|bottomright|rd[_ ])", "corner": "rd"},
+    "corner": {"label": "角饰 · 按位置自动", "default": true, "corner": "auto"},
+    "skip":   {"label": "不导出", "match": "^(参考|ref|_)"}
+  },
+  "dirs": {
+    "sprites": "Assets/Arts/UI/UIWidgets/UserInfoView/ChatBubblePrefabs/ChatBubbleEff_{id}",
+    "source":  "Assets/Arts/UI/UIWidgets/UserInfoView/ChatBubblePrefabs/ChatBubbleEff_{id}",
+    "shell":   "Assets/Loadable/UI/UIWidgets/UserInfoView/ChatBubblePrefabs/ChatBubbleEff_{id}"
+  },
+  "exists": ["Assets/Arts/UI/UIWidgets/UserInfoView/Textures/CreatorBubbles/HallChatBubble_{id}.png",
+             "Assets/Loadable/UI/UIWidgets/CreatorBubbles/GameChatBubble_{id}.png",
+             "Assets/Arts/UI/UIWidgets/UserInfoView/Textures/CreatorBubbles/ChatBubbleIcon_{id}.png",
+             "Assets/Arts/UI/UIWidgets/UserInfoView/ChatBubblePrefabs/ChatBubbleEff_{id}"],
+  "required": ["bubble", "icon"],
+  "fields": [
+    {"key": "title", "label": "名称(玩家看到的)", "type": "text", "default": "", "required": true},
+    {"key": "desc", "label": "获取途径说明(可选)", "type": "text", "default": ""},
+    {"key": "txtColor", "label": "3D 气泡文字颜色", "type": "color", "default": "#785745"},
+    {"key": "defColor", "label": "3D 气泡底图颜色", "type": "color", "default": "#FFFFFF"},
+    {"key": "miniX", "label": "3D 最小宽(世界单位)", "type": "number", "default": 2},
+    {"key": "miniY", "label": "3D 最小高", "type": "number", "default": 1},
+    {"key": "boarderX", "label": "3D 文字外边距 x", "type": "number", "default": 1},
+    {"key": "boarderY", "label": "3D 文字外边距 y", "type": "number", "default": 0.7},
+    {"key": "padL", "label": "大厅文字内边距 左", "type": "number", "default": 80},
+    {"key": "padR", "label": "右", "type": "number", "default": 100},
+    {"key": "padT", "label": "上", "type": "number", "default": 20},
+    {"key": "padB", "label": "下", "type": "number", "default": 15}
+  ],
+  "config": {
+    "file": "Assets/Loadable/UI/UIWidgets/UserInfoView/ChatBubbleConfig.json",
+    "entry": {"Id": "{id:int}", "Name": "{f:title}", "PgcId": "{id+120100000}", "IconName": "ChatBubbleIcon_{id}",
+              "MiniSize": {"x": "{num:miniX}", "y": "{num:miniY}"}, "Boarder": {"x": "{num:boarderX}", "y": "{num:boarderY}"},
+              "DefColor": "{rgba:defColor}", "TxtColor": "{rgba:txtColor}", "Desc": "{f:desc}?desc",
+              "LayoutOffset": {"left": "{num:padL}", "right": "{num:padR}", "top": "{num:padT}", "bottom": "{num:padB}"},
+              "CornerEffectPrefabPaths": "{list:corners}?corners"}
+  },
+  "afterImport": [
+    "CreatorBubbles 文件夹被 UserInfoBubbleView 图集打包:Unity 打开后图集会重新打包,.spriteatlas 的变化一起提交。",
+    "PgcId 按现有号段 1201000NN 推的,和服务端 / 策划确认一下。",
+    "3D 头顶气泡的角饰位置由 AvatarChatBox.SetText 按角写死的内缩量摆放,_Game 版位置按同样规则换算,进游戏看一眼。"
+  ],
+  "rules": {
+    "requireAlpha": true,
+    "keepInputSize": true,
+    "maxBytes": 1048576,
+    "maxOutlineGrowth": 0.002
+  },
+  "ai": {
+    "refs": ["dev/restyle/templates/style_swatch.png"],
+    "prompt": "dev/restyle/prompts/切图_保主色.txt",
+    "keepShape": true
+  },
+  "motionDefaults": {"corner": "sway", "lu": "sway", "ru": "sway", "ld": "sway", "rd": "sway"}
+}

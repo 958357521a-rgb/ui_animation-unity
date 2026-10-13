@@ -2,11 +2,12 @@
   "_说明": "资源批处理的「标准」:一类资源(这里是头像框)在主工程里放哪、叫什么、尺寸规则、AI 重绘用什么参考、默认动效。格式说明见 dev/pipeline/README.md。按主工程 2026-10-13 的现状写:底框图进 UserInfoHeadView 图集(打包 CreatorHeadCycle 文件夹),特效 = Arts 源 prefab + Loadable 壳 + Animator,配置在 HeadCycleConfig.json。",
   "id": "avatar_frame",
   "name": "头像框",
+  "order": 1,
   "idFrom": "(\\d+)\\s*$",
   "roles": {
     "frame":   {"label": "底框",     "match": "^(底框|框|frame|base|headcycle)", "size": [256, 256],
                 "path": "Assets/Arts/UI/UIWidgets/UserInfoView/Textures/CreatorHeadCycle/HeadCycle_{id}.png"},
-    "preview": {"label": "预览图",   "match": "(预览|_pre$|pre$|preview)",
+    "preview": {"label": "预览图",   "match": "(预览|_pre$|pre$|preview)", "stage": false,
                 "path": "Assets/Arts/UI/UIWidgets/UserInfoView/Textures/CreatorHeadCycle/HeadCycle_{id}_Pre.png"},
     "top":     {"label": "上层特效", "match": "^(上|top)", "default": true, "effect": "top"},
     "bottom":  {"label": "下层特效", "match": "^(下|bottom)", "effect": "bottom"},
@@ -25,8 +26,8 @@
   },
   "config": {
     "file": "Assets/Loadable/UI/UIWidgets/UserInfoView/HeadCycleConfig.json",
-    "entry": {"Id": "{id:int}", "Name": "{name}", "SpriteName": "HeadCycle_{id}", "PreviewSpriteName": "HeadCycle_{id}_Pre?",
-              "BottomEffectName": "HeadBottomEffect_{id}.prefab?", "TopEffectName": "HeadTopEffect_{id}.prefab?"}
+    "entry": {"Id": "{id:int}", "Name": "{name}", "SpriteName": "HeadCycle_{id}", "PreviewSpriteName": "HeadCycle_{id}_Pre?preview",
+              "BottomEffectName": "HeadBottomEffect_{id}.prefab?bottom", "TopEffectName": "HeadTopEffect_{id}.prefab?top"}
   },
   "rules": {
     "requireAlpha": true,

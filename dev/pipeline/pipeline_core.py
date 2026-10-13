@@ -63,11 +63,24 @@ def bridge_key():
 # ---------------- 标准 ----------------
 def standards():
     out = []
-    for f in sorted(glob.glob(os.path.join(HERE, "standards", "*.json"))):
-        s = json.load(open(f, encoding="utf-8"))
+    files = [(json.load(open(f, encoding="utf-8")), f) for f in glob.glob(os.path.join(HERE, "standards", "*.json"))]
+    for s, f in sorted(files, key=lambda x: (x[0].get("order", 50), x[1])):
         out.append({"id": s["id"], "name": s["name"], "replaceOnly": bool(s.get("replaceOnly")),
-                    "roles": {k: v["label"] for k, v in s["roles"].items()}, "note": s.get("_说明", "")})
+                    "roles": {k: v["label"] for k, v in s["roles"].items()}, "note": s.get("_说明", ""),
+                    # 页面用:哪些角色要填九宫格边距、不叠在动效预览上、能配动效;资源级的配置字段
+                    "roleInfo": {k: {"border": bool(v.get("border")), "stage": v.get("stage", True), "motion": _motion_ok(v)} for k, v in s["roles"].items()},
+                    "roleHelp": s.get("_角色说明", ""), "fields": s.get("fields", []), "idHint": s.get("idHint", "")})
     return out
+
+
+def _motion_ok(role):
+    """这个角色的切图会进带 Animator 的 prefab(动效能导出)"""
+    return bool(role.get("effect") or role.get("corner") or role.get("deco") or role.get("motion"))
+
+
+def _paths(role):
+    p = role.get("path")
+    return [p] if isinstance(p, str) else list(p or [])
 
 
 def standard(sid):
@@ -163,7 +176,7 @@ def _add_asset(job, std, name, w, h, slices, node_id=None, preview=None):
         open(os.path.join(d, "in", aname, sname + ".png"), "wb").write(s["data"])
         role = guess_role(std, sname)
         sl = {"name": sname, "file": f"in/{aname}/{sname}.png", "x": s.get("x", 0), "y": s.get("y", 0), "w": s["w"], "h": s["h"],
-              "nodeId": s.get("nodeId"), "role": role, "ai": role != "skip", "useNew": True, "status": "todo", "motion": None, "replacePath": ""}
+              "nodeId": s.get("nodeId"), "role": role, "ai": role != "skip" and not std["roles"].get(role, {}).get("placeOnly"), "useNew": True, "status": "todo", "motion": None, "replacePath": ""}
         md = std.get("motionDefaults", {}).get(role)
         if md:
             sl["motion"] = {"preset": md} | {k: v for k, v in uy.PRESETS[md].items() if k != "label"}
@@ -202,12 +215,17 @@ def update(jid, patch):
                 continue
             if "id" in ap:
                 a["id"] = str(ap["id"]).strip() or None
+            if isinstance(ap.get("fields"), dict):   # 配置字段(颜色、说明文字……)
+                a["fields"] = {**(a.get("fields") or {}), **{str(k): v for k, v in ap["fields"].items()}}
             for s in a["slices"]:
                 sp = (ap.get("slices") or {}).get(s["name"])
                 if sp:
                     for k in ("role", "ai", "useNew", "motion", "replacePath"):
                         if k in sp:
                             s[k] = sp[k]
+                    if "border" in sp:   # 九宫格边距 [左, 下, 右, 上](像素,和 Unity spriteBorder 同顺序)
+                        b = sp["border"]
+                        s["border"] = [max(0, int(float(x or 0))) for x in b][:4] if isinstance(b, list) and len(b) == 4 else None
         return save(job)
 
 
@@ -362,7 +380,13 @@ def _final_file(d, a, s):
 
 
 def _fill(t, mapping):
-    return re.sub(r"\{(\w+)(?::\w+)?\}", lambda m: str(mapping.get(m.group(1), m.group(0))), t)
+    """{id} → 编号;{id+150100000} → 编号加上这个数(各类 PgcId 的号段);{name} → 资源名"""
+    def rep(m):
+        v = mapping.get(m.group(1))
+        if v is None:
+            return m.group(0)
+        return str(int(v) + int(m.group(2))) if m.group(2) else str(v)
+    return re.sub(r"\{(\w+)(?:\+(\d+))?(?::\w+)?\}", rep, t)
 
 
 def check(jid):
@@ -381,16 +405,37 @@ def check(jid):
             if not a.get("id"):
                 say("error", "缺编号:资源名末尾要带数字(如「头像框_40」),或在页面上填编号")
             elif root:
-                for k, r in std["roles"].items():
-                    if r.get("path") and os.path.exists(os.path.join(root, _fill(r["path"], {"id": a["id"]}))):
-                        say("error", f"主工程里已有编号 {a['id']} 的{r['label']}:{_fill(r['path'], {'id': a['id']})}(要替换旧的就切到「替换」模式)")
+                taken = ([(_fill(p, {"id": a["id"]}), "") for p in std.get("exists", [])]
+                         or [(_fill(p, {"id": a["id"]}), r["label"]) for r in std["roles"].values() for p in _paths(r)])
+                for p, label in taken:
+                    if os.path.exists(os.path.join(root, p)):
+                        say("error", f"主工程里已有编号 {a['id']} 的{label or '资源'}:{p}(要替换旧的就切到「替换」模式)")
                         break
             roles = [s["role"] for s in live]
             for k, r in std["roles"].items():
                 if r.get("path") and roles.count(k) > 1:
                     say("error", f"有 {roles.count(k)} 张切图都是「{r['label']}」,只能有一张")
+            for k in std.get("required", []):
+                if k not in roles:
+                    say("error", f"缺「{std['roles'][k]['label']}」:这类资源必须有")
+            for k in std.get("recommended", []):
+                if k not in roles:
+                    say("warn", f"没有「{std['roles'][k]['label']}」" + (std.get("recommendedNote", {}).get(k) or ""))
         if not root:
             say("warn", "没设主工程路径,跳过「编号重名 / 替换目标存在」检查")
+        if job["mode"] == "new" and std.get("config"):
+            fv = {f["key"]: f.get("default", "") for f in std.get("fields", [])} | (a.get("fields") or {})
+            for f in std.get("fields", []):
+                v = str(fv.get(f["key"], "")).strip()
+                if f.get("required") and not v:
+                    say("warn", f"配置字段「{f['label']}」没填(写进配置条目会是空的)")
+                elif f.get("type") == "color" and v and _hex(v) is None:
+                    say("error", f"配置字段「{f['label']}」要填颜色,如 #FFAA00")
+                elif f.get("type") == "number":
+                    try:
+                        float(v)
+                    except ValueError:
+                        say("error", f"配置字段「{f['label']}」要填数字")
         for s in a["slices"]:
             s["issues"] = []
             if s["role"] == "skip":
@@ -432,8 +477,11 @@ def check(jid):
                         say("error", "主工程里没有这张图或它的 .meta:" + rp, s["issues"])
                     elif Image.open(tp).size != im.size:
                         say("error", f"和主工程里的旧图尺寸不同(旧 {Image.open(tp).size[0]}×{Image.open(tp).size[1]}),原地换图要同尺寸", s["issues"])
+            role = std["roles"].get(s["role"], {})
+            if role.get("border") and job["mode"] == "new" and not any(s.get("border") or []):
+                say("warn", "九宫格边距没填(左 / 下 / 右 / 上):拉伸时四角会变形", s["issues"])
             m = s.get("motion")
-            if m and std["roles"].get(s["role"], {}).get("effect") is None and job["mode"] == "new":
+            if m and m.get("preset") and not _motion_ok(role) and job["mode"] == "new":
                 say("warn", f"「{std['roles'][s['role']]['label']}」不进特效 prefab,这张图上的动效不会导出", s["issues"])
             if m and job["mode"] == "replace":
                 say("warn", "替换模式只换图,动效不会导出", s["issues"])
@@ -450,7 +498,107 @@ def check(jid):
 
 
 # ---------------- 生成交付包 ----------------
+class Ctx:
+    """一个资源的生成上下文:写贴图 / prefab / 动画进交付包(同一路径只写一次),记 README 说明。builders.py 里的各类生成函数用它"""
+    def __init__(self, std, job, a, live, d, assets, notes):
+        self.std, self.job, self.asset, self.live, self.d, self._assets, self._notes = std, job, a, live, d, assets, notes
+        self.mp = {"id": a.get("id"), "name": a["name"]}
+        self._by_path = {}
+
+    def role(self, s):
+        return self.std["roles"].get(s["role"], {})
+
+    def of(self, role):
+        return [s for s in self.live if s["role"] == role]
+
+    def first(self, role):
+        return next(iter(self.of(role)), None)
+
+    def dirs(self):
+        return {k: _fill(v, self.mp) for k, v in (self.std.get("dirs") or self.std.get("effectDirs") or {}).items() if isinstance(v, str)}
+
+    def note(self, text):
+        self._notes.append(text)
+
+    def guid_of(self, path):
+        return self._by_path[path.lower()]
+
+    def _put(self, path, data, meta_fn, guid=None):
+        key = path.lower()
+        if key in self._by_path:
+            return self._by_path[key]
+        g = guid or uy.stable_guid(path)
+        self._assets.append({"path": path, "guid": g, "data": data, "meta": meta_fn(g)})
+        self._by_path[key] = g
+        return g
+
+    def png(self, path, s, border=None, astc=None):
+        """s:切图(用它的最终图:AI 新图或原图)"""
+        im = Image.open(_final_file(self.d, self.asset, s)); buf = io.BytesIO(); im.save(buf, "PNG", optimize=True)
+        r = self.role(s)
+        border = border or (s.get("border") if r.get("border") else None) or (0, 0, 0, 0)
+        astc = astc if astc is not None else r.get("astc", self.std.get("astc", []))
+        return self._put(path, buf.getvalue(), lambda g: uy.sprite_meta(g, border, astc))
+
+    def add(self, path, text, meta_fn):
+        return self._put(path, text.encode("utf-8"), meta_fn)
+
+    def anim(self, clip_path, ctrl_path, motions, **kw):
+        """写 .anim + .controller,返回控制器 GUID;片段 / 状态名取文件名"""
+        clip_name = os.path.splitext(os.path.basename(clip_path))[0]; ctrl_name = os.path.splitext(os.path.basename(ctrl_path))[0]
+        cg = self._put(clip_path, uy.anim_clip(clip_name, motions, **kw).encode("utf-8"), lambda g: uy.native_meta(g, 7400000))
+        return self._put(ctrl_path, uy.anim_controller(ctrl_name, cg).encode("utf-8"), lambda g: uy.native_meta(g, 9100000))
+
+
+def _hex(c):
+    c = (c or "").strip().lstrip("#")
+    if not re.fullmatch(r"[0-9a-fA-F]{6}([0-9a-fA-F]{2})?", c):
+        return None
+    return [int(c[i:i + 2], 16) / 255 for i in range(0, len(c), 2)] + ([1.0] if len(c) == 6 else [])
+
+
+def _entry(tpl, mp, fields, present):
+    """配置条目模板 → 条目。叶子字符串:"{id:int}" → 数字;"{num:字段}" → 数字;"{rgba:字段}" → {r,g,b,a}(字段是 #RRGGBB[AA]);
+    "{list:变量}" → 生成时得到的列表(如气泡实际做了哪些角);"{f:字段}" 嵌在文字里 → 字段值;其余 {id} / {id+N} / {name} 照 _fill。
+    值末尾 "?角色或变量名" = 有这个角色的切图 / 做出了这个特效 / 变量非空才写这一项"""
+    def leaf(v):
+        if v == "{id:int}":
+            return int(mp["id"])
+        m = re.fullmatch(r"\{(num|rgba|list):(\w+)\}", v)
+        if m:
+            kind, key = m.groups()
+            if kind == "list":
+                return list(mp.get(key) or [])
+            if kind == "num":
+                try:
+                    x = float(fields.get(key, 0)); return int(x) if x == int(x) else x
+                except (TypeError, ValueError):
+                    raise ValueError(f"配置字段「{key}」要填数字")
+            rgba = _hex(fields.get(key))
+            if rgba is None:
+                raise ValueError(f"配置字段「{key}」要填颜色(#RRGGBB)")
+            return {ch: round(x, 6) for ch, x in zip("rgba", rgba)}
+        return _fill(re.sub(r"\{f:(\w+)\}", lambda m: str(fields.get(m.group(1), "")), v), mp)
+
+    def walk(t):
+        if isinstance(t, dict):
+            out = {}
+            for k, v in t.items():
+                if isinstance(v, str) and "?" in v and re.search(r"\?(\w+)$", v):
+                    cond = re.search(r"\?(\w+)$", v).group(1)
+                    if cond not in present:
+                        continue
+                    v = v[:-len(cond) - 1]
+                out[k] = walk(v)
+            return out
+        if isinstance(t, list):
+            return [walk(x) for x in t]
+        return leaf(t) if isinstance(t, str) else t
+    return walk(tpl)
+
+
 def build(jid):
+    import builders
     job = check(jid)
     if job["checked"]["error"]:
         raise ValueError(f"还有 {job['checked']['error']} 个必须处理的问题(红色),处理完再生成")
@@ -476,63 +624,69 @@ def build(jid):
                 notes.append(f"- 换图:`{rp}`")
             continue
         aid = a["id"]; mp = {"id": aid, "name": a["name"]}
+        ctx = Ctx(std, job, a, live, d, assets, notes)
+        # 单张图:角色带 path 的切图按落点写(path 可以是几个落点,同一张图复制几份,如气泡的大厅底图 + 游戏内底图)
         for s in live:
             r = std["roles"][s["role"]]
-            if r.get("path"):
-                p = _fill(r["path"], mp); png(p, _final_file(d, a, s)); notes.append(f"- {r['label']}:`{p}`")
+            for p in _paths(r):
+                p = _fill(p, mp); ctx.png(p, s); notes.append(f"- {r['label']}:`{p}`")
         made = {}
-        ed = std.get("effectDirs", {}); u = float(ed.get("unitsPerPx", 1)); root_size = ed.get("rootSize", [100, 100])
-        for ek, e in std.get("effects", {}).items():
-            layers = [s for s in live if std["roles"][s["role"]].get("effect") == ek]
-            if not layers:
-                continue
-            pname = _fill(e["prefab"], mp); sdir = _fill(ed["sprites"], mp)
-            lay, motions = [], []
-            used = set()
-            for i, s in enumerate(layers, 1):
-                # 节点名 = 动画路径(Unity 按名字的 CRC32 绑定)、贴图文件名:一律用英文,中文切图名换成 Layer_01…(只在工作台里显示中文)
-                ln = s["name"] if re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", s["name"]) and s["name"].lower() not in used else f"Layer_{i:02d}"
-                used.add(ln.lower())
-                g = png(f"{sdir}/{pname}_{ln}.png", _final_file(d, a, s))
-                x = (s["x"] + s["w"] / 2 - a["w"] / 2) * u; y = (a["h"] / 2 - (s["y"] + s["h"] / 2)) * u
-                lay.append({"name": ln, "sprite_guid": g, "x": x, "y": y, "w": s["w"] * u, "h": s["h"] * u})
-                if s.get("motion") and s["motion"].get("preset"):
-                    motions.append(dict(s["motion"], path=ln, base_x=x, base_y=y))
-            ctrl_guid = None
-            if motions:
-                clip_p, ctrl_p = f"{sdir}/{pname}.anim", f"{sdir}/{pname}.controller"
-                cg, ctrl_guid = uy.stable_guid(clip_p), uy.stable_guid(ctrl_p)
-                assets.append({"path": clip_p, "guid": cg, "data": uy.anim_clip(pname, motions).encode("utf-8"), "meta": uy.native_meta(cg, 7400000)})
-                assets.append({"path": ctrl_p, "guid": ctrl_guid, "data": uy.anim_controller(pname, cg).encode("utf-8"), "meta": uy.native_meta(ctrl_guid, 9100000)})
-            src_p = f"{ed['source']}/{pname}.prefab"; sg = uy.stable_guid(src_p)
-            text, go, rt = uy.effect_prefab(pname, lay, ctrl_guid, root_size)
-            assets.append({"path": src_p, "guid": sg, "data": text.encode("utf-8"), "meta": uy.prefab_meta(sg)})
-            shell_p = f"{ed['shell']}/{pname}.prefab"; shg = uy.stable_guid(shell_p)
-            assets.append({"path": shell_p, "guid": shg, "data": uy.shell_prefab(pname, sg, go, rt, root_size).encode("utf-8"), "meta": uy.prefab_meta(shg)})
-            made[ek] = pname
-            notes.append(f"- 特效 `{pname}`:{len(lay)} 层、{len(motions)} 个动效 → 源 `{src_p}`,壳 `{shell_p}`")
+        if std.get("builder"):
+            mp.update(builders.BUILDERS[std["builder"]](ctx) or {})
+        else:   # 头像框:Arts 源 + Loadable 壳 + Animator(逐字段对齐 HeadTopEffect_36)
+            ed = std.get("effectDirs", {}); u = float(ed.get("unitsPerPx", 1)); root_size = ed.get("rootSize", [100, 100])
+            for ek, e in std.get("effects", {}).items():
+                layers = [s for s in live if std["roles"][s["role"]].get("effect") == ek]
+                if not layers:
+                    continue
+                pname = _fill(e["prefab"], mp); sdir = _fill(ed["sprites"], mp)
+                lay, motions = [], []
+                used = set()
+                for i, s in enumerate(layers, 1):
+                    # 节点名 = 动画路径(Unity 按名字的 CRC32 绑定)、贴图文件名:一律用英文,中文切图名换成 Layer_01…(只在工作台里显示中文)
+                    ln = s["name"] if re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", s["name"]) and s["name"].lower() not in used else f"Layer_{i:02d}"
+                    used.add(ln.lower())
+                    g = ctx.png(f"{sdir}/{pname}_{ln}.png", s)
+                    x = (s["x"] + s["w"] / 2 - a["w"] / 2) * u; y = (a["h"] / 2 - (s["y"] + s["h"] / 2)) * u
+                    lay.append({"name": ln, "sprite_guid": g, "x": x, "y": y, "w": s["w"] * u, "h": s["h"] * u})
+                    if s.get("motion") and s["motion"].get("preset"):
+                        motions.append(dict(s["motion"], path=ln, base_x=x, base_y=y))
+                ctrl_guid = None
+                if motions:
+                    clip_p, ctrl_p = f"{sdir}/{pname}.anim", f"{sdir}/{pname}.controller"
+                    cg, ctrl_guid = uy.stable_guid(clip_p), uy.stable_guid(ctrl_p)
+                    assets.append({"path": clip_p, "guid": cg, "data": uy.anim_clip(pname, motions).encode("utf-8"), "meta": uy.native_meta(cg, 7400000)})
+                    assets.append({"path": ctrl_p, "guid": ctrl_guid, "data": uy.anim_controller(pname, cg).encode("utf-8"), "meta": uy.native_meta(ctrl_guid, 9100000)})
+                src_p = f"{_fill(ed['source'], mp)}/{pname}.prefab"; sg = uy.stable_guid(src_p)
+                text, go, rt = uy.effect_prefab(pname, lay, ctrl_guid, root_size)
+                assets.append({"path": src_p, "guid": sg, "data": text.encode("utf-8"), "meta": uy.prefab_meta(sg)})
+                shell_p = f"{_fill(ed['shell'], mp)}/{pname}.prefab"; shg = uy.stable_guid(shell_p)
+                assets.append({"path": shell_p, "guid": shg, "data": uy.shell_prefab(pname, sg, go, rt, root_size).encode("utf-8"), "meta": uy.prefab_meta(shg)})
+                made[ek] = pname
+                notes.append(f"- 特效 `{pname}`:{len(lay)} 层、{len(motions)} 个动效 → 源 `{src_p}`,壳 `{shell_p}`")
         cfg = std.get("config")
         if cfg:
-            roles = {s["role"] for s in live}
-            entry = {}
-            for k, v in cfg["entry"].items():
-                opt = v.endswith("?"); v = v.rstrip("?")
-                if opt and ((k == "PreviewSpriteName" and "preview" not in roles) or (k == "TopEffectName" and "top" not in made)
-                            or (k == "BottomEffectName" and "bottom" not in made)):
-                    continue
-                entry[k] = int(aid) if v == "{id:int}" else _fill(v, mp)
-            entries.append(entry)
+            fields = {f["key"]: f.get("default", "") for f in std.get("fields", [])} | (a.get("fields") or {})
+            present = {s["role"] for s in live} | set(made) | {k for k, v in mp.items() if v}
+            entries.append(_entry(cfg["entry"], mp, fields, present))
     if not assets:
         raise ValueError("没有可导出的内容")
     os.makedirs(os.path.join(d, "build"), exist_ok=True)
-    pkg = os.path.join(d, "build", safe(job["name"]) + ".unitypackage")
+    # 交付包文件名只用英文:Unity 解包时经 7-Zip 走短路径,中文文件名会「Couldn't decompress package」(2026-10-13 空白工程实测)
+    ids = "_".join(sorted({re.sub(r"[^0-9A-Za-z]", "", str(a.get("id") or "")) for a in job["assets"]} - {""}))[:60]
+    pkg = os.path.join(d, "build", f"{std['id']}_{ids or job['mode']}_{jid[-4:]}.unitypackage")
+    for old in glob.glob(os.path.join(d, "build", "*.unitypackage")):   # 换了名字的旧包删掉,build 里只留最新一个
+        if os.path.normcase(old) != os.path.normcase(pkg):
+            os.remove(old)
     write_unitypackage(pkg, assets)
     readme = [f"# {job['name']}", "", f"标准:{std['name']} · 模式:{'新增' if job['mode'] == 'new' else '替换'} · 生成于 {now()}", "",
               "## 包里有什么", ""] + notes
     if entries:
         readme += ["", f"## 还要手动加的配置({std['config']['file']})", "",
-                   "交付包不会改已有的配置文件(避免覆盖别人同时加的条目),把下面的条目加进数组末尾:", "", "```json",
+                   std["config"].get("howto") or "交付包不会改已有的配置文件(避免覆盖别人同时加的条目),把下面的条目加进数组末尾:", "", "```json",
                    ",\n".join(json.dumps(e, ensure_ascii=False, indent=2) for e in entries), "```"]
+    if std.get("afterImport"):
+        readme += ["", "## 导入后", ""] + [f"- {t}" for t in std["afterImport"]]
     open(os.path.join(d, "build", "README.md"), "w", encoding="utf-8").write("\n".join(readme) + "\n")
     with job_lock(jid):
         cur = load(jid); cur["built"] = {"time": now(), "package": pkg.replace("\\", "/"), "assets": len(assets), "configEntries": entries}

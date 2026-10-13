@@ -6,6 +6,12 @@
 |---|---|---|
 | `pipeline/avatar_frame_9036/` | 资源批处理示例:主工程头像框 36 号的底框、预览图和 8 个上层部件,`layout.json` 写了每张切图的位置(相对 256×256 画框左上角)、示例动效;`ai_examples/` 是 3 张 AI 重绘示例新图(含 `_compare.png` 新旧对比) | `python dev/pipeline_demo.py --job` 建好示例任务;或不加 `--job`,当成 Figma 插件发来的一批放进中转箱,在页面上「从 Figma 收件」 |
 | `pipeline/avatar_frame_9036/示例输出/` | 示例任务生成的交付包和 README(编号 9036,不会和主工程已有的重名) | 直接导入空白 Unity 工程看结构:底框 / 预览进头像框图集文件夹,上层特效 = 源 prefab + Loadable 壳 + Animator 动画 |
+| `pipeline/chat_bubble_9038/` | 聊天气泡框示例:主工程 38 号「巫灵夜游会」的底图、图标、预览和 3 个角饰,九宫格边距和配置字段取自主工程 | 同上;`示例输出/` 里是交付包(底图两份、每个角 UGUI 版 + _Game 版角饰) |
+| `pipeline/title_9043/` | 称号示例:主工程 43 号「山河知音客」的图标和 5 个部件(位置按 Title_43/2D.prefab 换算) | 同上;交付包里 2D / 3D prefab 各带一份动画 |
+| `pipeline/nickname_frame_9019/` | 昵称框示例:主工程 19 号「苗笙寄韵」的框图和预览底图(静态,没有部件) | 同上;交付包里昵称框 prefab + 预览 prefab |
+| `pipeline/home_skin_9045/` | 主页皮肤示例:主工程 45 号「桂月栖兔」的背景、12 个装饰、底栏、卡片框 1~5、合成效果图和缩略图(装饰位置按 Theme_45 换算;卡片位置是示例摆放,`卡片k_位置` 是不导出的占位框) | 同上;交付包里 ThemeBg + Bg1~5 + 壳 + 预览 |
+
+全部示例一次建好:`python dev/pipeline_demo.py --all --job`(同名示例任务会先删掉再建);改了生成器后更新各 `示例输出/`:加 `--out`。
 | `workbench/GemPack.budui.json` | 工作台示例工程:钻石充值页(1 页,已覆盖进主工程 GemPackView) | 工作台「载入工程」选它,看导入后的图层、交互、动效 |
 
 使用说明:`docs/资源批处理_使用说明.md`;暂定规范(待审核):`docs/资源批处理_暂定规范.md`。

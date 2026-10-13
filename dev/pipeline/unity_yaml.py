@@ -43,10 +43,16 @@ def yaml_str(s):
 
 
 # ---------------- meta ----------------
-def sprite_meta(guid, border=(0, 0, 0, 0)):
+def sprite_meta(guid, border=(0, 0, 0, 0), astc=()):
+    """astc:要覆盖成 ASTC 6x6(textureFormat 50)的平台,如 ("Android", "iPhone")——
+    气泡 / 称号 / 昵称框 / 主页皮肤的贴图都这样设(2026-10-13 对照主工程 HallChatBubble_38、Title_43、NicknameIcon19、Theme_45),头像框部件不覆盖"""
     t = open(os.path.join(HERE, "templates", "sprite.png.meta"), encoding="utf-8").read()
-    return (t.replace("{{GUID}}", guid).replace("{{BL}}", num(border[0])).replace("{{BB}}", num(border[1]))
-             .replace("{{BR}}", num(border[2])).replace("{{BT}}", num(border[3])))
+    t = (t.replace("{{GUID}}", guid).replace("{{BL}}", num(border[0])).replace("{{BB}}", num(border[1]))
+          .replace("{{BR}}", num(border[2])).replace("{{BT}}", num(border[3])))
+    for plat in astc:
+        a = t.index(f"    buildTarget: {plat}\n"); b = t.index("forceMaximumCompressionQuality_BC6H_BC7", a)
+        t = t[:a] + t[a:b].replace("textureFormat: -1", "textureFormat: 50").replace("overridden: 0", "overridden: 1") + t[b:]
+    return t
 
 
 def prefab_meta(guid):
@@ -207,14 +213,17 @@ MonoBehaviour:
     return "".join(out), go, rt
 
 
-def shell_prefab(name, source_guid, root_go, root_rt, root_size=(100, 100)):
-    """Loadable 壳:直接实例化 Arts 源 prefab(与 HeadTopEffect_36 的壳同样的 21 项修改)"""
-    mods = [(root_go, "m_Name", yaml_str(name))] + [(root_rt, p, v) for p, v in (
-        ("m_Pivot.x", "0.5"), ("m_Pivot.y", "0.5"), ("m_AnchorMax.x", "0.5"), ("m_AnchorMax.y", "0.5"),
-        ("m_AnchorMin.x", "0.5"), ("m_AnchorMin.y", "0.5"), ("m_SizeDelta.x", num(root_size[0])), ("m_SizeDelta.y", num(root_size[1])),
+def shell_prefab(name, source_guid, root_go, root_rt, root_size=(100, 100), anchor_min=(0.5, 0.5), anchor_max=None, rect=True):
+    """Loadable 壳:直接实例化 Arts 源 prefab(与 HeadTopEffect_36 的壳同样的 21 项修改)。
+    rect=False:源 prefab 根节点是 Transform(气泡角饰的 _Game 版),只改位置 / 旋转 / 名字(对照 ChatBubbleEff_38/LeftUp_Game 的壳)"""
+    anchor_max = anchor_max or anchor_min
+    rect_part = (("m_Pivot.x", "0.5"), ("m_Pivot.y", "0.5"), ("m_AnchorMax.x", num(anchor_max[0])), ("m_AnchorMax.y", num(anchor_max[1])),
+                 ("m_AnchorMin.x", num(anchor_min[0])), ("m_AnchorMin.y", num(anchor_min[1])),
+                 ("m_SizeDelta.x", num(root_size[0])), ("m_SizeDelta.y", num(root_size[1]))) if rect else ()
+    mods = [(root_go, "m_Name", yaml_str(name))] + [(root_rt, p, v) for p, v in rect_part + (
         ("m_LocalPosition.x", "0"), ("m_LocalPosition.y", "0"), ("m_LocalPosition.z", "0"),
-        ("m_LocalRotation.w", "1"), ("m_LocalRotation.x", "0"), ("m_LocalRotation.y", "0"), ("m_LocalRotation.z", "0"),
-        ("m_AnchoredPosition.x", "0"), ("m_AnchoredPosition.y", "0"),
+        ("m_LocalRotation.w", "1"), ("m_LocalRotation.x", "0"), ("m_LocalRotation.y", "0"), ("m_LocalRotation.z", "0"))
+        + ((("m_AnchoredPosition.x", "0"), ("m_AnchoredPosition.y", "0")) if rect else ()) + (
         ("m_LocalEulerAnglesHint.x", "0"), ("m_LocalEulerAnglesHint.y", "0"), ("m_LocalEulerAnglesHint.z", "0"))]
     body = "".join(f"    - target: {{fileID: {t}, guid: {source_guid}, type: 3}}\n      propertyPath: {p}\n      value: {v}\n      objectReference: {{fileID: 0}}\n"
                    for t, p, v in mods)
@@ -232,6 +241,136 @@ PrefabInstance:
     m_AddedComponents: []
   m_SourcePrefab: {{fileID: 100100000, guid: {source_guid}, type: 3}}
 """
+
+
+# ---------------- 通用节点树 prefab(气泡角饰 / 称号 / 昵称框 / 主页皮肤) ----------------
+# 节点 dict:name;rect(True = RectTransform,False = Transform);layer(默认跟根节点);anchor_min / anchor_max / pivot / pos / size / scale;
+# image {guid, raycast(默认 0:装饰图不拦截点击)};sprite {guid, size(Unity 单位), order}(SpriteRenderer,对照 ChatBubbleEff_38/*_Game、Title_41/3D);
+# canvas_renderer(只挂 CanvasRenderer,昵称框根节点);text {text, font, size, color}(UGUI Text,昵称框预览);
+# animator(controller GUID);layout_ignore(LayoutElement 忽略布局,气泡角饰);children;
+# nested {guid, root_rt, root_go, mods: [(目标 fileID, 属性, 值, 引用)]}(嵌套 prefab 实例,如主页皮肤的 SizeToFitBgView)。
+# fileID 按「prefab 名/节点路径|组件」派生(同名兄弟加 #2),和 effect_prefab 同一套:再生成逐字节不变。
+LAYOUT_ELEMENT_SCRIPT = "{fileID: 11500000, guid: 306cc8c2b49d7114eaa3623786fc2126, type: 3}"
+TEXT_SCRIPT = "{fileID: 11500000, guid: 5f7201a12d95ffc409449d95f23cf332, type: 3}"
+_HDR = "  m_ObjectHideFlags: 0\n  m_CorrespondingSourceObject: {fileID: 0}\n  m_PrefabInstance: {fileID: 0}\n  m_PrefabAsset: {fileID: 0}\n"
+
+
+def _v2(v):
+    return "{x: %s, y: %s}" % (num(v[0]), num(v[1]))
+
+
+def prefab_tree(root):
+    """返回 (prefab 文本, {节点路径: (GameObject fileID, Transform fileID)});根节点路径 = 根节点名"""
+    out, ids = [HEADER], {}
+
+    def emit(n, key, father, layer):
+        rect = n.get("rect", True)
+        go, tr = fid(key + "|go"), fid(key + "|rt")
+        ids[key] = (go, tr)
+        comps = [tr]
+        if n.get("animator"):
+            comps.append(fid(key + "|animator"))
+        if n.get("image") or n.get("canvas_renderer") or n.get("text"):
+            comps.append(fid(key + "|cr"))
+        if n.get("image"):
+            comps.append(fid(key + "|img"))
+        if n.get("text"):
+            comps.append(fid(key + "|text"))
+        if n.get("sprite"):
+            comps.append(fid(key + "|sr"))
+        if n.get("layout_ignore"):
+            comps.append(fid(key + "|layout"))
+        kids, seen = [], {}
+        for c in n.get("children", []):
+            seen[c["name"]] = seen.get(c["name"], 0) + 1
+            ck = f"{key}/{c['name']}" + (f"#{seen[c['name']]}" if seen[c["name"]] > 1 else "")
+            kids.append((c, ck))
+        kid_ids = []
+        for c, ck in kids:
+            if c.get("nested"):
+                inst = int(fid(ck + "|instance"))
+                kid_ids.append(str(inst ^ int(c["nested"]["root_rt"])))
+            else:
+                kid_ids.append(fid(ck + "|rt"))
+        s = n.get("scale", 1); pos = n.get("pos", (0, 0))
+        out.append(f"--- !u!1 &{go}\nGameObject:\n{_HDR}  serializedVersion: 6\n  m_Component:\n"
+                   + "".join(f"  - component: {{fileID: {c}}}\n" for c in comps)
+                   + f"  m_Layer: {layer}\n  m_Name: {yaml_str(n['name'])}\n  m_TagString: Untagged\n  m_Icon: {{fileID: 0}}\n"
+                   "  m_NavMeshLayer: 0\n  m_StaticEditorFlags: 0\n  m_IsActive: 1\n")
+        body = (f"  m_LocalRotation: {{x: 0, y: 0, z: 0, w: 1}}\n"
+                f"  m_LocalPosition: {{x: {num(0 if rect else pos[0])}, y: {num(0 if rect else pos[1])}, z: 0}}\n"
+                f"  m_LocalScale: {{x: {num(s)}, y: {num(s)}, z: {num(s)}}}\n  m_ConstrainProportionsScale: 0\n  m_Children:"
+                + ("".join(f"\n  - {{fileID: {k}}}" for k in kid_ids) if kid_ids else " []")
+                + f"\n  m_Father: {{fileID: {father}}}\n  m_LocalEulerAnglesHint: {{x: 0, y: 0, z: 0}}\n")
+        if rect:
+            amin = n.get("anchor_min", (0.5, 0.5)); amax = n.get("anchor_max", amin)
+            out.append(f"--- !u!224 &{tr}\nRectTransform:\n{_HDR}  m_GameObject: {{fileID: {go}}}\n{body}"
+                       f"  m_AnchorMin: {_v2(amin)}\n  m_AnchorMax: {_v2(amax)}\n  m_AnchoredPosition: {_v2(pos)}\n"
+                       f"  m_SizeDelta: {_v2(n.get('size', (100, 100)))}\n  m_Pivot: {_v2(n.get('pivot', (0.5, 0.5)))}\n")
+        else:
+            out.append(f"--- !u!4 &{tr}\nTransform:\n{_HDR}  m_GameObject: {{fileID: {go}}}\n  serializedVersion: 2\n{body}")
+        if n.get("animator"):
+            out.append(f"--- !u!95 &{fid(key + '|animator')}\nAnimator:\n  serializedVersion: 5\n{_HDR}  m_GameObject: {{fileID: {go}}}\n"
+                       f"  m_Enabled: 1\n  m_Avatar: {{fileID: 0}}\n  m_Controller: {{fileID: 9100000, guid: {n['animator']}, type: 2}}\n"
+                       "  m_CullingMode: 0\n  m_UpdateMode: 0\n  m_ApplyRootMotion: 0\n  m_LinearVelocityBlending: 0\n  m_StabilizeFeet: 0\n"
+                       "  m_WarningMessage: \n  m_HasTransformHierarchy: 1\n  m_AllowConstantClipSamplingOptimization: 1\n"
+                       "  m_KeepAnimatorStateOnDisable: 0\n  m_WriteDefaultValuesOnDisable: 0\n")
+        if n.get("image") or n.get("canvas_renderer") or n.get("text"):
+            out.append(f"--- !u!222 &{fid(key + '|cr')}\nCanvasRenderer:\n{_HDR}  m_GameObject: {{fileID: {go}}}\n  m_CullTransparentMesh: 1\n")
+        if n.get("image"):
+            im = n["image"]
+            out.append(f"--- !u!114 &{fid(key + '|img')}\nMonoBehaviour:\n{_HDR}  m_GameObject: {{fileID: {go}}}\n  m_Enabled: 1\n"
+                       f"  m_EditorHideFlags: 0\n  m_Script: {IMAGE_SCRIPT}\n  m_Name: \n  m_EditorClassIdentifier: \n  m_Material: {{fileID: 0}}\n"
+                       f"  m_Color: {{r: 1, g: 1, b: 1, a: 1}}\n  m_RaycastTarget: {im.get('raycast', 0)}\n  m_RaycastPadding: {{x: 0, y: 0, z: 0, w: 0}}\n"
+                       "  m_Maskable: 1\n  m_OnCullStateChanged:\n    m_PersistentCalls:\n      m_Calls: []\n"
+                       f"  m_Sprite: {{fileID: 21300000, guid: {im['guid']}, type: 3}}\n  m_Type: 0\n  m_PreserveAspect: 0\n  m_FillCenter: 1\n"
+                       "  m_FillMethod: 4\n  m_FillAmount: 1\n  m_FillClockwise: 1\n  m_FillOrigin: 0\n  m_UseSpriteMesh: 0\n  m_PixelsPerUnitMultiplier: 1\n")
+        if n.get("text"):
+            t = n["text"]; c = t.get("color", (0, 0, 0, 1))
+            out.append(f"--- !u!114 &{fid(key + '|text')}\nMonoBehaviour:\n{_HDR}  m_GameObject: {{fileID: {go}}}\n  m_Enabled: 1\n"
+                       f"  m_EditorHideFlags: 0\n  m_Script: {TEXT_SCRIPT}\n  m_Name: \n  m_EditorClassIdentifier: \n  m_Material: {{fileID: 0}}\n"
+                       f"  m_Color: {{r: {num(c[0])}, g: {num(c[1])}, b: {num(c[2])}, a: {num(c[3])}}}\n  m_RaycastTarget: 0\n"
+                       "  m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}\n  m_Maskable: 1\n  m_OnCullStateChanged:\n    m_PersistentCalls:\n      m_Calls: []\n"
+                       f"  m_FontData:\n    m_Font: {{fileID: 12800000, guid: {t['font']}, type: 3}}\n    m_FontSize: {t.get('size', 40)}\n"
+                       f"    m_FontStyle: 0\n    m_BestFit: 0\n    m_MinSize: 4\n    m_MaxSize: {t.get('size', 40)}\n    m_Alignment: 4\n"
+                       "    m_AlignByGeometry: 0\n    m_RichText: 1\n    m_HorizontalOverflow: 0\n    m_VerticalOverflow: 0\n    m_LineSpacing: 1\n"
+                       f"  m_Text: {yaml_str(t['text'])}\n")
+        if n.get("sprite"):
+            sp = n["sprite"]
+            out.append(f"--- !u!212 &{fid(key + '|sr')}\nSpriteRenderer:\n{_HDR}  m_GameObject: {{fileID: {go}}}\n  m_Enabled: 1\n"
+                       "  m_CastShadows: 0\n  m_ReceiveShadows: 0\n  m_DynamicOccludee: 1\n  m_StaticShadowCaster: 0\n  m_MotionVectors: 1\n"
+                       "  m_LightProbeUsage: 1\n  m_ReflectionProbeUsage: 1\n  m_RayTracingMode: 0\n  m_RayTraceProcedural: 0\n"
+                       "  m_RenderingLayerMask: 1\n  m_RendererPriority: 0\n  m_Materials:\n  - {fileID: 10754, guid: 0000000000000000f000000000000000, type: 0}\n"
+                       "  m_StaticBatchInfo:\n    firstSubMesh: 0\n    subMeshCount: 0\n  m_StaticBatchRoot: {fileID: 0}\n  m_ProbeAnchor: {fileID: 0}\n"
+                       "  m_LightProbeVolumeOverride: {fileID: 0}\n  m_ScaleInLightmap: 1\n  m_ReceiveGI: 1\n  m_PreserveUVs: 0\n"
+                       "  m_IgnoreNormalsForChartDetection: 0\n  m_ImportantGI: 0\n  m_StitchLightmapSeams: 1\n  m_SelectedEditorRenderState: 0\n"
+                       "  m_MinimumChartSize: 4\n  m_AutoUVMaxDistance: 0.5\n  m_AutoUVMaxAngle: 89\n  m_LightmapParameters: {fileID: 0}\n"
+                       f"  m_SortingLayerID: 0\n  m_SortingLayer: 0\n  m_SortingOrder: {sp.get('order', 0)}\n"
+                       f"  m_Sprite: {{fileID: 21300000, guid: {sp['guid']}, type: 3}}\n  m_Color: {{r: 1, g: 1, b: 1, a: 1}}\n  m_FlipX: 0\n  m_FlipY: 0\n"
+                       f"  m_DrawMode: 0\n  m_Size: {_v2(sp['size'])}\n  m_AdaptiveModeThreshold: 0.5\n  m_SpriteTileMode: 0\n  m_WasSpriteAssigned: 1\n"
+                       "  m_MaskInteraction: 0\n  m_SpriteSortPoint: 0\n")
+        if n.get("layout_ignore"):
+            out.append(f"--- !u!114 &{fid(key + '|layout')}\nMonoBehaviour:\n{_HDR}  m_GameObject: {{fileID: {go}}}\n  m_Enabled: 1\n"
+                       f"  m_EditorHideFlags: 0\n  m_Script: {LAYOUT_ELEMENT_SCRIPT}\n  m_Name: \n  m_EditorClassIdentifier: \n  m_IgnoreLayout: 1\n"
+                       "  m_MinWidth: -1\n  m_MinHeight: -1\n  m_PreferredWidth: -1\n  m_PreferredHeight: -1\n  m_FlexibleWidth: -1\n"
+                       "  m_FlexibleHeight: -1\n  m_LayoutPriority: 1\n")
+        for c, ck in kids:
+            if c.get("nested"):
+                nd = c["nested"]; inst = fid(ck + "|instance")
+                mods = "".join(f"    - target: {{fileID: {t}, guid: {nd['guid']}, type: 3}}\n      propertyPath: {p}\n      value: {v}\n"
+                               f"      objectReference: {ref or '{fileID: 0}'}\n" for t, p, v, ref in nd["mods"])
+                out.append(f"--- !u!1001 &{inst}\nPrefabInstance:\n  m_ObjectHideFlags: 0\n  serializedVersion: 2\n  m_Modification:\n"
+                           f"    serializedVersion: 3\n    m_TransformParent: {{fileID: {tr}}}\n    m_Modifications:\n{mods}"
+                           "    m_RemovedComponents: []\n    m_RemovedGameObjects: []\n    m_AddedGameObjects: []\n    m_AddedComponents: []\n"
+                           f"  m_SourcePrefab: {{fileID: 100100000, guid: {nd['guid']}, type: 3}}\n"
+                           f"--- !u!224 &{int(inst) ^ int(nd['root_rt'])} stripped\nRectTransform:\n"
+                           f"  m_CorrespondingSourceObject: {{fileID: {nd['root_rt']}, guid: {nd['guid']}, type: 3}}\n"
+                           f"  m_PrefabInstance: {{fileID: {inst}}}\n  m_PrefabAsset: {{fileID: 0}}\n")
+            else:
+                emit(c, ck, tr, c.get("layer", layer))
+
+    emit(root, root["name"], 0, root.get("layer", 5))
+    return "".join(out), ids
 
 
 # ---------------- 动效预设 → 动画曲线 ----------------
@@ -289,10 +428,20 @@ def _hex_rgb(c):
     return tuple(int(c[i:i + 2], 16) / 255 for i in (0, 2, 4))
 
 
-def anim_clip(name, motions):
-    """motions: [{path(层名), preset, amp, period, delay, color, base_x, base_y}] → .anim 文本(motions 不能为空)"""
+def anim_clip(name, motions, rect=True, colors=("image",)):
+    """motions: [{path(层名), preset, amp, period, delay, color, base_x, base_y}] → .anim 文本(motions 不能为空)。
+    rect=True:层是 RectTransform(UGUI,位置动 m_AnchoredPosition);False:层是 Transform(场景里的 3D 版,位置动 m_LocalPosition,
+    对照 Title_43/3D_animation.anim)。colors:颜色 / 透明度动哪个组件——image(UGUI Image)、sprite(SpriteRenderer,classID 212,
+    对照 Title_25/3d_animation.anim);气泡角饰的 UGUI 版和 _Game 版共用一个控制器,所以两种都写(缺的那种 Unity 运行时直接忽略)"""
     length = max(float(m.get("period") or PRESETS[m["preset"]]["period"]) for m in motions)
-    euler, scale, floats, editor, euler_editor, bindings = [], [], [], [], [], []
+    euler, scale, floats, positions, editor, euler_editor, bindings = [], [], [], [], [], [], []
+    tcls = 224 if rect else 4
+
+    def add_color(path, attr, keys):
+        if "image" in colors:
+            add_float(path, attr, keys, 114, IMAGE_SCRIPT)
+        if "sprite" in colors:
+            add_float(path, attr, keys, 212)
 
     def add_float(path, attr, keys, cls, script="{fileID: 0}", custom=0, flags=0):
         block = f"  - serializedVersion: 2\n{_float_curve(keys, 4)}    attribute: {attr}\n    path: {yaml_str(path)}\n    classID: {cls}\n    script: {script}\n    flags: {flags}\n"
@@ -309,30 +458,40 @@ def anim_clip(name, motions):
             euler.append(f"  - {_vec_curve([(t, (0, 0, v), (0, 0, s)) for t, v, s in ks], 4)[4:]}    path: {yaml_str(path)}\n")
             for ax in "xyz":
                 kk = ks if ax == "z" else [(t, 0, 0) for t, _, _ in ks]
-                editor.append(f"  - serializedVersion: 2\n{_float_curve(kk, 4)}    attribute: localEulerAnglesRaw.{ax}\n    path: {yaml_str(path)}\n    classID: 224\n    script: {{fileID: 0}}\n    flags: 16\n")
+                editor.append(f"  - serializedVersion: 2\n{_float_curve(kk, 4)}    attribute: localEulerAnglesRaw.{ax}\n    path: {yaml_str(path)}\n    classID: {tcls}\n    script: {{fileID: 0}}\n    flags: 16\n")
                 euler_editor.append(f"  - serializedVersion: 2\n    curve:\n      serializedVersion: 2\n      m_Curve: []\n      m_PreInfinity: 2\n      m_PostInfinity: 2\n      m_RotationOrder: 4\n"
-                                    f"    attribute: m_LocalEulerAngles.{ax}\n    path: {yaml_str(path)}\n    classID: 224\n    script: {{fileID: 0}}\n    flags: 0\n")
+                                    f"    attribute: m_LocalEulerAngles.{ax}\n    path: {yaml_str(path)}\n    classID: {tcls}\n    script: {{fileID: 0}}\n    flags: 0\n")
             bindings.append((zlib.crc32(path.encode("utf-8")), 4, "{fileID: 0}", 4, 4))
         elif m["preset"] == "breathe":
             ks = _keys("cos", length, p, d, lambda u, du: (1 + amp * u, amp * du))
             scale.append(f"  - {_vec_curve([(t, (v, v, 1), (s, s, 0)) for t, v, s in ks], 4)[4:]}    path: {yaml_str(path)}\n")
             for ax in "xyz":
                 kk = ks if ax != "z" else [(t, 1, 0) for t, _, _ in ks]
-                editor.append(f"  - serializedVersion: 2\n{_float_curve(kk, 4)}    attribute: m_LocalScale.{ax}\n    path: {yaml_str(path)}\n    classID: 224\n    script: {{fileID: 0}}\n    flags: 0\n")
+                editor.append(f"  - serializedVersion: 2\n{_float_curve(kk, 4)}    attribute: m_LocalScale.{ax}\n    path: {yaml_str(path)}\n    classID: {tcls}\n    script: {{fileID: 0}}\n    flags: 0\n")
             bindings.append((zlib.crc32(path.encode("utf-8")), 3, "{fileID: 0}", 4, 0))
         elif m["preset"] in ("float", "shake"):
             axis, base = ("y", float(m.get("base_y") or 0)) if m["preset"] == "float" else ("x", float(m.get("base_x") or 0))
             ks = _keys("sin", length, p, d, lambda u, du: (base + amp * u, amp * du))
-            add_float(path, f"m_AnchoredPosition.{axis}", ks, 224, custom=28)
+            if rect:
+                add_float(path, f"m_AnchoredPosition.{axis}", ks, 224, custom=28)
+            else:
+                bx, by = float(m.get("base_x") or 0), float(m.get("base_y") or 0)
+                vec = lambda v: (bx, v, 0) if axis == "y" else (v, by, 0)
+                slope = lambda sl: (0, sl, 0) if axis == "y" else (sl, 0, 0)
+                positions.append(f"  - {_vec_curve([(t, vec(v), slope(sl)) for t, v, sl in ks], 4)[4:]}    path: {yaml_str(path)}\n")
+                for i, ax in enumerate("xyz"):
+                    kk = [(t, vec(v)[i], slope(sl)[i]) for t, v, sl in ks]
+                    editor.append(f"  - serializedVersion: 2\n{_float_curve(kk, 4)}    attribute: m_LocalPosition.{ax}\n    path: {yaml_str(path)}\n    classID: 4\n    script: {{fileID: 0}}\n    flags: 0\n")
+                bindings.append((zlib.crc32(path.encode("utf-8")), 1, "{fileID: 0}", 4, 0))
         elif m["preset"] == "blink":
             ks = _keys("cos", length, p, d, lambda u, du: (1 - amp * u, -amp * du))
-            add_float(path, "m_Color.a", ks, 114, IMAGE_SCRIPT)
+            add_color(path, "m_Color.a", ks)
         elif m["preset"] == "tint":
             rgb = _hex_rgb(m.get("color") or pr["color"])
             for ch, target in zip("rgb", rgb):
                 k = (target - 1) * min(amp, 1)
                 ks = _keys("cos", length, p, d, lambda u, du, k=k: (1 + k * u, k * du))
-                add_float(path, f"m_Color.{ch}", ks, 114, IMAGE_SCRIPT)
+                add_color(path, f"m_Color.{ch}", ks)
         else:
             raise ValueError("未知动效预设:" + m["preset"])
 
@@ -360,8 +519,7 @@ AnimationClip:
   m_UseHighQualityCurve: 1
   m_RotationCurves: []
   m_CompressedRotationCurves: []
-  m_EulerCurves:{lst(euler)}  m_PositionCurves: []
-  m_ScaleCurves:{lst(scale)}  m_FloatCurves:{lst(floats)}  m_PPtrCurves: []
+  m_EulerCurves:{lst(euler)}  m_PositionCurves:{lst(positions)}  m_ScaleCurves:{lst(scale)}  m_FloatCurves:{lst(floats)}  m_PPtrCurves: []
   m_SampleRate: 60
   m_WrapMode: 0
   m_Bounds:

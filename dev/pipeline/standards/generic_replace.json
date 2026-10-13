@@ -2,6 +2,7 @@
   "_说明": "通用 · 原地换图:每张切图换掉主工程里一张已有的图(同路径、同尺寸,.meta 原样沿用 → GUID、九宫格、图集、prefab 引用都不变)。只支持「替换」,不生成 prefab / 动效。每张切图的目标路径在批处理页面里填(或用切图名自动匹配,见 README)。",
   "id": "generic_replace",
   "name": "通用 · 原地换图",
+  "order": 9,
   "replaceOnly": true,
   "idFrom": null,
   "roles": {

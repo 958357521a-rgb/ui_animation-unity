@@ -1,0 +1,251 @@
+{
+ "_说明": "示例资源:主工程主页皮肤 45 号「桂月栖兔」的背景、12 个装饰、底栏、卡片框(Frame01~04,卡片 4 和主工程一样复用 Frame03)、合成效果图和缩略图;装饰位置按 Theme_45/ThemeBg.prefab 换算成相对 2436×1125 画框左上角。卡片位置是示例摆放(个人页上卡片 2~5 在右侧同一块区域、不同页签,所以叠在一起),「卡片k_位置」是占位框、不导出。编号改成 9045 以免和主工程重名。颜色字段取自主工程 45 号配置。",
+ "standard": "home_skin",
+ "asset": {
+  "name": "主页皮肤_9045",
+  "w": 2436,
+  "h": 1125,
+  "preview": "合成效果图.png",
+  "slices": [
+   {
+    "name": "背景",
+    "file": "背景.png",
+    "x": 0,
+    "y": 0
+   },
+   {
+    "name": "装饰_Image_08",
+    "file": "装饰_Image_08.png",
+    "x": 23.5,
+    "y": 205.1
+   },
+   {
+    "name": "装饰_Image_09",
+    "file": "装饰_Image_09.png",
+    "x": 252.3,
+    "y": 862.7
+   },
+   {
+    "name": "装饰_Image_03",
+    "file": "装饰_Image_03.png",
+    "x": -38.9,
+    "y": 816.8
+   },
+   {
+    "name": "装饰_Image_04",
+    "file": "装饰_Image_04.png",
+    "x": 170.2,
+    "y": 931.5
+   },
+   {
+    "name": "装饰_Image_00",
+    "file": "装饰_Image_00.png",
+    "x": 149.7,
+    "y": 783.4
+   },
+   {
+    "name": "装饰_Image_02",
+    "file": "装饰_Image_02.png",
+    "x": -58.5,
+    "y": 879.0
+   },
+   {
+    "name": "装饰_Image_01",
+    "file": "装饰_Image_01.png",
+    "x": 634.5,
+    "y": 729.5
+   },
+   {
+    "name": "装饰_Image_10",
+    "file": "装饰_Image_10.png",
+    "x": 101.4,
+    "y": 760.2
+   },
+   {
+    "name": "装饰_Image_05",
+    "file": "装饰_Image_05.png",
+    "x": -193.3,
+    "y": -218.7
+   },
+   {
+    "name": "装饰_Image_07",
+    "file": "装饰_Image_07.png",
+    "x": 779.5,
+    "y": -12.0
+   },
+   {
+    "name": "装饰_Image_06",
+    "file": "装饰_Image_06.png",
+    "x": 662.5,
+    "y": 141.0
+   },
+   {
+    "name": "装饰_Image_11",
+    "file": "装饰_Image_11.png",
+    "x": 135.4,
+    "y": -0.0
+   },
+   {
+    "name": "底栏",
+    "file": "底栏.png",
+    "x": 0,
+    "y": 1009
+   },
+   {
+    "name": "底栏上层",
+    "file": "底栏上层.png",
+    "x": 0,
+    "y": 922.5
+   },
+   {
+    "name": "卡片1_位置",
+    "file": "卡片1_位置.png",
+    "x": 70,
+    "y": 150
+   },
+   {
+    "name": "卡片1_主体",
+    "file": "卡片1_主体.png",
+    "x": 48.5,
+    "y": 174.0
+   },
+   {
+    "name": "卡片1_头部",
+    "file": "卡片1_头部.png",
+    "x": 61.5,
+    "y": 138.0
+   },
+   {
+    "name": "卡片2_位置",
+    "file": "卡片2_位置.png",
+    "x": 1010,
+    "y": 150
+   },
+   {
+    "name": "卡片2_主体",
+    "file": "卡片2_主体.png",
+    "x": 973.5,
+    "y": 179.0
+   },
+   {
+    "name": "卡片2_头部",
+    "file": "卡片2_头部.png",
+    "x": 986.5,
+    "y": 143.0
+   },
+   {
+    "name": "卡片3_位置",
+    "file": "卡片3_位置.png",
+    "x": 1010,
+    "y": 150
+   },
+   {
+    "name": "卡片3_主体",
+    "file": "卡片3_主体.png",
+    "x": 964.3,
+    "y": 268.0
+   },
+   {
+    "name": "卡片3_头部",
+    "file": "卡片3_头部.png",
+    "x": 977.0,
+    "y": 142.0
+   },
+   {
+    "name": "卡片4_位置",
+    "file": "卡片4_位置.png",
+    "x": 1010,
+    "y": 150
+   },
+   {
+    "name": "卡片4_主体",
+    "file": "卡片4_主体.png",
+    "x": 964.3,
+    "y": 268.0
+   },
+   {
+    "name": "卡片4_头部",
+    "file": "卡片4_头部.png",
+    "x": 977.0,
+    "y": 142.0
+   },
+   {
+    "name": "卡片5_位置",
+    "file": "卡片5_位置.png",
+    "x": 1700,
+    "y": 150
+   },
+   {
+    "name": "卡片5_主体",
+    "file": "卡片5_主体.png",
+    "x": 1681.0,
+    "y": 193.5
+   },
+   {
+    "name": "卡片5_头部",
+    "file": "卡片5_头部.png",
+    "x": 1694.0,
+    "y": 143.5
+   },
+   {
+    "name": "合成效果图",
+    "file": "合成效果图.png",
+    "x": 0,
+    "y": 0
+   },
+   {
+    "name": "缩略图",
+    "file": "缩略图.png",
+    "x": 0,
+    "y": 0
+   }
+  ]
+ },
+ "motions": {
+  "装饰_Image_06": {
+   "preset": "float",
+   "amp": 6,
+   "period": 3
+  },
+  "装饰_Image_07": {
+   "preset": "float",
+   "amp": 6,
+   "period": 3,
+   "delay": 1
+  },
+  "装饰_Image_11": {
+   "preset": "sway",
+   "amp": 8,
+   "period": 2
+  },
+  "装饰_Image_09": {
+   "preset": "sway",
+   "amp": 5,
+   "period": 3
+  },
+  "装饰_Image_04": {
+   "preset": "breathe",
+   "amp": 0.06,
+   "period": 2
+  },
+  "装饰_Image_10": {
+   "preset": "blink",
+   "amp": 0.3,
+   "period": 2
+  }
+ },
+ "fields": {
+  "title": "桂月栖兔主页皮肤(示例)",
+  "previewTitle": "<color=#6E3D9E>通过中秋礼包解锁</color><color=#F461A2>桂月栖兔主页皮肤</color>",
+  "titleBgColor": "#F0836C00",
+  "profileCardColor": "#F0836C00",
+  "mainBgColor": "#FFF7CB",
+  "cardSubColor": "#FFF8DC",
+  "placeHolderColor": "#CCB47C",
+  "textColor": "#000000",
+  "textBorderColor": "#FFFFFF",
+  "gridColor": "#FFEAB8",
+  "priceColor": "#FFCFDD",
+  "titleInfoColor": "#FFCFDD"
+ }
+}

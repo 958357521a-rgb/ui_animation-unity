@@ -122,16 +122,35 @@ async function api(action, body){
 const run = async (fn, okText) => { try { const r = await fn(); if (okText) toast(okText); return r; } catch (e) { show(`<b style="color:var(--err)">没做成</b><p style="margin-top:8px">${esc(e.message)}</p>`); } };
 const fileUrl = rel => `${SVC ? SVC.base : ""}/exports/pipeline/${JOB.id}/${encodeURI(rel)}?t=${encodeURIComponent(JOB.updated || "")}`;
 
+// 内嵌在工作台任务首页「资源批处理」页签里(?embed=1):自己的顶栏隐藏,配对码 / 主工程路径交给工作台顶栏显示和保存
+const EMBED = new URLSearchParams(location.search).has("embed");
+// job:当前打开的批处理任务,工作台记下来,刷新后用 ?job= 重新打开
+const tellParent = () => { if (EMBED && INFO) parent.postMessage({budui: "pipe-info", key: INFO.key, unityRoot: INFO.settings.unityRoot || "", job: JOB ? JOB.id : ""}, "*"); };
+function rememberJob(){
+  tellParent();
+  if (!EMBED) try { history.replaceState(null, "", location.pathname + (JOB ? "?job=" + encodeURIComponent(JOB.id) : "")); } catch (e) {}
+}
+if (EMBED){
+  document.querySelector("header").style.display = "none";
+  addEventListener("message", async e => {
+    const d = e.data; if (e.source !== parent || !d) return;
+    if (d.budui === "pipe-saveRoot"){ $("#unityRoot").value = d.value || ""; $("#saveRoot").onclick(); }
+    else if (d.budui === "pipe-reload") boot();
+  });
+}
 async function boot(){
   INFO = await run(() => api("info"));
   if (!INFO) return;
   $("#key").textContent = INFO.key;
   $("#unityRoot").value = INFO.settings.unityRoot || "";
+  tellParent();
   $("#nStd").innerHTML = INFO.standards.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join("");
   await loadJobs();
+  const want = new URLSearchParams(location.search).get("job");   // 刷新前打开的任务
+  if (want && !JOB){ const r = await api("jobs").catch(() => null); if (r && r.items.some(j => j.id === want)) await openJob(want); }
 }
 $("#keyChip").onclick = () => navigator.clipboard.writeText(INFO.key).then(() => toast("配对码已复制,填进 Figma 插件「资源批处理」"));
-$("#saveRoot").onclick = () => run(() => api("settings", {settings: {unityRoot: $("#unityRoot").value}}), "主工程路径已保存");
+$("#saveRoot").onclick = () => run(async () => { await api("settings", {settings: {unityRoot: $("#unityRoot").value}}); if (INFO){ INFO.settings.unityRoot = $("#unityRoot").value; tellParent(); } }, "主工程路径已保存");
 $("#nGo").onclick = () => run(async () => { const j = await api("create", {name: $("#nName").value, standard: $("#nStd").value, mode: $("#nMode").value}); $("#nName").value = ""; await loadJobs(); openJob(j.id); });
 
 async function loadJobs(){
@@ -142,7 +161,7 @@ async function loadJobs(){
 }
 async function openJob(id){
   const j = await run(() => api("job", {job: id})); if (!j) return;
-  JOB = j; render(); loadJobs(); poll();
+  JOB = j; render(); loadJobs(); poll(); rememberJob();
 }
 function poll(){
   clearTimeout(pollT);
@@ -167,6 +186,7 @@ function motionCss(m, scale){
 }
 
 const ROLE_HELP = "角色决定这张切图进主工程哪里:底框 / 预览图是单张图;上层 / 下层特效会合成特效 prefab,只有它们的动效会导出";
+const roleInfo = (std, r) => (std.roleInfo || {})[r] || {stage: true, motion: true};
 function render(){
   if (!JOB){ $("#view").innerHTML = `<div class="empty">左边选一个任务,或新建一个</div>`; return; }
   const std = INFO.standards.find(s => s.id === JOB.standard) || {roles: {}};
@@ -195,7 +215,7 @@ function render(){
     const sc = Math.min(1, 240 / Math.max(a.w, a.h, 1));
     let stage = `<div class="stage" style="width:${a.w * sc}px;height:${a.h * sc}px" title="动效预览(浏览器里的近似效果,以 Unity 为准)">`;
     a.slices.forEach(s => {
-      if (s.role === "skip" || s.role === "preview") return;   // 预览图是单独的一张(商店 / 列表里用),不叠在框上
+      if (s.role === "skip" || roleInfo(std, s.role).stage === false) return;   // 图标 / 预览图等单独的一张(商店 / 列表里用),不叠在动效预览上
       const src = fileUrl(s.useNew !== false && s.new ? s.new : s.file);
       const mc = s.motion && s.motion.preset ? motionCss(s.motion, sc) : {};
       if (mc.kf) styles.push(mc.kf);
@@ -205,8 +225,9 @@ function render(){
     stage += `</div>`;
     h += `<div class="asset"><div class="ahead"><span class="n">${esc(a.name)}</span><span class="note">${a.w}×${a.h} · ${a.slices.length} 张切图</span>
       ${JOB.mode === "new" && std.roles && INFO.standards.find(s => s.id === JOB.standard).roles ? `<span class="note">编号</span><input data-aid="${ai_}" value="${esc(a.id || "")}" style="width:80px">` : ""}
-      ${(a.issues || []).map(i => `<div class="iss ${i.level}" style="width:100%">${i.level === "error" ? "✗" : "!"} ${esc(i.text)}</div>`).join("")}</div>
-      <div class="abody">${stage}<div style="flex:1;min-width:0;overflow:auto"><table><tr><th>原图</th><th>新图</th><th>切图</th><th title="${esc(ROLE_HELP)}">角色 ⓘ</th><th>AI</th><th>用新图</th><th>动效</th>${JOB.mode === "replace" ? "<th>替换主工程里的</th>" : ""}</tr>`;
+      ${(a.issues || []).map(i => `<div class="iss ${i.level}" style="width:100%">${i.level === "error" ? "✗" : "!"} ${esc(i.text)}</div>`).join("")}
+      ${JOB.mode === "new" && (std.fields || []).length ? fieldsForm(std, a, ai_) : ""}</div>
+      <div class="abody">${stage}<div style="flex:1;min-width:0;overflow:auto"><table><tr><th>原图</th><th>新图</th><th>切图</th><th title="${esc(std.roleHelp || ROLE_HELP)}">角色 ⓘ</th><th>AI</th><th>用新图</th><th>动效</th>${JOB.mode === "replace" ? "<th>替换主工程里的</th>" : ""}</tr>`;
     a.slices.forEach((s, si) => {
       const m = s.motion || {}, P = m.preset ? INFO.presets[m.preset] : null;
       const unit = {sway: "°", float: "px", shake: "px", breathe: "倍", blink: "", tint: ""}[m.preset] || "";
@@ -214,11 +235,12 @@ function render(){
         <td><div class="thumb"><img src="${fileUrl(s.file)}"></div></td>
         <td><div class="thumb">${s.new ? `<img src="${fileUrl(s.new)}">` : ""}</div></td>
         <td><b>${esc(s.name)}</b><div class="note">${s.w}×${s.h} @ ${Math.round(s.x)},${Math.round(s.y)}</div><span class="st ${s.status}">${{todo: "未处理", queued: "排队中", running: "重绘中", done: "已重绘", failed: "重绘失败"}[s.status] || s.status}</span>
+          ${roleInfo(std, s.role).border && JOB.mode === "new" ? `<div class="mot" style="margin-top:4px" title="九宫格边距(像素):拉伸时四角保持不变的范围,顺序和 Unity 的 Sprite Border 一样">九宫格 ${["左", "下", "右", "上"].map((l, i) => `${l}<input type="number" min="0" step="1" data-f="border" data-i="${i}" value="${(s.border || [])[i] || 0}" style="width:52px">`).join("")}</div>` : ""}
           ${(s.issues || []).map(i => `<div class="iss ${i.level}">${i.level === "error" ? "✗" : "!"} ${esc(i.text)}</div>`).join("")}</td>
         <td><select data-f="role">${Object.entries(std.roles).map(([k, v]) => `<option value="${k}" ${s.role === k ? "selected" : ""}>${esc(v)}</option>`).join("")}</select></td>
         <td><input type="checkbox" data-f="ai" ${s.ai ? "checked" : ""}></td>
         <td><input type="checkbox" data-f="useNew" ${s.useNew !== false ? "checked" : ""} ${s.new ? "" : "disabled"}></td>
-        <td><div class="mot"><select data-f="preset"><option value="">无</option>${Object.entries(INFO.presets).map(([k, v]) => `<option value="${k}" ${m.preset === k ? "selected" : ""}>${esc(v.label)}</option>`).join("")}</select>
+        <td><div class="mot"><select data-f="preset" ${JOB.mode === "new" && !roleInfo(std, s.role).motion && !m.preset ? 'disabled title="这个角色不进带动画的 prefab,动效不会导出"' : ""}><option value="">无</option>${Object.entries(INFO.presets).map(([k, v]) => `<option value="${k}" ${m.preset === k ? "selected" : ""}>${esc(v.label)}</option>`).join("")}</select>
           ${P ? `<input type="number" step="any" data-f="amp" value="${m.amp != null ? m.amp : P.amp}" title="幅度">${unit}
             <input type="number" step="0.1" min="0.1" data-f="period" value="${m.period || P.period}" title="周期(秒)">秒
             <input type="number" step="0.05" data-f="delay" value="${m.delay || 0}" title="错开(秒):几层同时动时错开一点更自然">错开
@@ -233,6 +255,18 @@ function render(){
   bind();
 }
 
+// 资源级的配置字段(名称、说明、颜色……):写进 README 里要加的配置条目
+function fieldsForm(std, a, ai_){
+  const v = a.fields || {};
+  return `<details style="width:100%" ${(std.fields || []).some(f => f.required && !(v[f.key] || f.default)) ? "open" : ""}><summary class="note" style="cursor:pointer">配置条目字段(名称、说明、颜色……,生成时写进 README 里的配置条目)</summary>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:6px 14px;margin-top:6px">${std.fields.map(f => {
+      const val = v[f.key] != null ? v[f.key] : (f.default != null ? f.default : "");
+      const hex = /^#[0-9a-f]{6}$/i.test(String(val)) ? val : "#000000";
+      return `<label class="note" style="display:flex;align-items:center;gap:6px">${esc(f.label)}${f.required ? "<b style='color:var(--warn)'>*</b>" : ""}
+        <input data-field="${esc(f.key)}" data-aid="${ai_}" value="${esc(val)}" style="flex:1;min-width:0" ${f.type === "number" ? 'inputmode="decimal"' : ""}>
+        ${f.type === "color" ? `<input type="color" data-field-color="${esc(f.key)}" data-aid="${ai_}" value="${esc(hex)}" style="width:30px;height:24px;padding:1px">` : ""}</label>`;
+    }).join("")}</div></details>`;
+}
 function slicePatch(tr, field, val){
   const a = JOB.assets[+tr.dataset.a], s = a.slices[+tr.dataset.s];
   let p = {};
@@ -241,6 +275,8 @@ function slicePatch(tr, field, val){
       const P = INFO.presets[val];
       p.motion = val ? Object.assign({preset: val, amp: P.amp, period: P.period, delay: 0}, P.color ? {color: P.color} : {}) : null;
     } else p.motion = Object.assign({}, s.motion, {[field]: field === "color" ? val : +val});
+  } else if (field === "border"){
+    p.border = [...tr.querySelectorAll('[data-f="border"]')].map(i => +i.value || 0);
   } else p[field] = val;
   return {assets: {[a.name]: {slices: {[s.name]: p}}}};
 }
@@ -248,7 +284,7 @@ let saveT = null;
 function bind(){
   $("#jName").onchange = e => run(async () => { JOB = await api("update", {job: JOB.id, patch: {name: e.target.value}}); loadJobs(); });
   $("#jMode").onchange = e => run(async () => { JOB = await api("update", {job: JOB.id, patch: {mode: e.target.value}}); render(); loadJobs(); });
-  $("#jDel").onclick = async () => { if (await ask(`删除任务「${JOB.name}」?原图、新图、交付包都会删掉,不能恢复。`, null, "删除")) run(async () => { await api("delete", {job: JOB.id}); JOB = null; render(); loadJobs(); }); };
+  $("#jDel").onclick = async () => { if (await ask(`删除任务「${JOB.name}」?原图、新图、交付包都会删掉,不能恢复。`, null, "删除")) run(async () => { await api("delete", {job: JOB.id}); JOB = null; render(); loadJobs(); rememberJob(); }); };
   $("#aInbox").onclick = () => run(async () => {
     const r = await api("inbox");
     if (!r.items.length) return show(`<b>中转箱是空的</b><p class="note" style="margin-top:8px">在桌面版 Figma 里:插件 → BUD UI Studio →「资源批处理」,填上右上角的配对码,选中资源点「发送」。<br>开发版插件第一次要从 Figma 菜单「插件 → 开发 → 从清单导入」选 figma-plugin/manifest.json。</p>`);
@@ -265,7 +301,11 @@ function bind(){
       ${r.configEntries.length ? `<p style="margin-top:8px">配置文件不会被改,要手动加这些条目(README 里也有):</p><pre class="note" style="white-space:pre-wrap">${esc(r.configEntries.map(e => JSON.stringify(e, null, 2)).join(",\n"))}</pre>` : ""}`);
   });
   $("#aPush").onclick = () => run(() => api("push", {job: JOB.id}), "已放进中转箱:到 Figma 插件「资源批处理」里点「取回处理结果」");
-  document.querySelectorAll("[data-aid]").forEach(i => i.onchange = () => run(async () => { const a = JOB.assets[+i.dataset.aid]; JOB = await api("update", {job: JOB.id, patch: {assets: {[a.name]: {id: i.value}}}}); render(); }));
+  document.querySelectorAll("input[data-aid]:not([data-field]):not([data-field-color])").forEach(i => i.onchange = () => run(async () => { const a = JOB.assets[+i.dataset.aid]; JOB = await api("update", {job: JOB.id, patch: {assets: {[a.name]: {id: i.value}}}}); render(); }));
+  document.querySelectorAll("[data-field], [data-field-color]").forEach(i => i.onchange = () => run(async () => {
+    const a = JOB.assets[+i.dataset.aid], key = i.dataset.field || i.dataset.fieldColor;
+    JOB = await api("update", {job: JOB.id, patch: {assets: {[a.name]: {fields: {[key]: i.value}}}}}); render();
+  }));
   document.querySelectorAll("tr[data-a] [data-f]").forEach(el => {
     const ev = el.type === "number" || el.classList.contains("rp") ? "change" : el.type === "color" ? "change" : "change";
     el.addEventListener(ev, () => {
@@ -276,7 +316,8 @@ function bind(){
 }
 $("#files").onchange = async e => {
   const fs = [...e.target.files]; if (!fs.length) return;
-  const name = await ask("这批切图属于哪个资源?(头像框要带编号,如「头像框_40」)", fs.length === 1 ? fs[0].name.replace(/\.png$/i, "") : "");
+  const std = INFO.standards.find(s => s.id === JOB.standard) || {};
+  const name = await ask(`这批切图属于哪个资源?(名字末尾带编号,如「${std.idHint || "头像框_40"}」)`, fs.length === 1 ? fs[0].name.replace(/\.png$/i, "") : "");
   if (!name) return;
   const files = await Promise.all(fs.map(f => new Promise(res => { const r = new FileReader(); r.onload = () => res({name: f.name, b64: r.result.split(",")[1]}); r.readAsDataURL(f); })));
   run(async () => { JOB = await api("upload", {job: JOB.id, name, files}); render(); loadJobs(); }, `已加入 ${files.length} 张`);

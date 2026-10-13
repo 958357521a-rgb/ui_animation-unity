@@ -1,0 +1,51 @@
+{
+  "_说明": "称号:按主工程 2026-10-13 的现状(参照 41 号静态、42 / 43 号带动画)。全部放在 Loadable(称号没有 Arts 源 + 壳的拆分):图标 Title/Icon/Title_<id>.png(进 UserTitleView 图集,标准 304×72);Title/Prefab/Title_<id>/ 下 2D.prefab(个人主页 / 预览用)和 3D.prefab(场景头顶用)。没有部件 = 静态称号(图标原样做成 2D / 3D);有部件就每个部件一个节点,配了动效时 2D / 3D 各一份 2d_animation / 3d_animation。配置 TitleConfig.json。",
+  "_角色说明": "图标是列表 / 奖励里显示的整张称号图;部件是 prefab 里的分层(要动的部分单独切出来),没有部件时 prefab 直接用图标",
+  "id": "title",
+  "name": "称号",
+  "order": 3,
+  "builder": "title",
+  "idFrom": "(\\d+)\\s*$",
+  "idHint": "称号_44",
+  "astc": ["Android", "iPhone"],
+  "roles": {
+    "icon": {"label": "图标(整张称号图)", "match": "^(图标|icon|称号图|整图)", "stage": false, "size": [304, 72],
+             "path": "Assets/Loadable/UI/UIWidgets/Title/Icon/Title_{id}.png"},
+    "part": {"label": "部件(进 2D / 3D prefab)", "default": true, "motion": true},
+    "skip": {"label": "不导出", "match": "^(参考|ref|_)"}
+  },
+  "dirs": {"prefab": "Assets/Loadable/UI/UIWidgets/Title/Prefab/Title_{id}"},
+  "exists": ["Assets/Loadable/UI/UIWidgets/Title/Icon/Title_{id}.png", "Assets/Loadable/UI/UIWidgets/Title/Prefab/Title_{id}"],
+  "required": ["icon"],
+  "fields": [
+    {"key": "title", "label": "名称(玩家看到的)", "type": "text", "default": "", "required": true},
+    {"key": "desc", "label": "获取途径说明", "type": "text", "default": ""},
+    {"key": "scale", "label": "显示缩放(Size)", "type": "number", "default": 0.5}
+  ],
+  "config": {
+    "file": "Assets/Loadable/UI/UIWidgets/Title/TitleConfig.json",
+    "entry": {"Id": "{id:int}", "Name": "{f:title}", "PgcId": "{id+190100000}",
+              "Size": {"x": "{num:scale}", "y": "{num:scale}", "z": "{num:scale}"},
+              "SpriteName": "Title_{id}", "Desc": "{f:desc}",
+              "Icon": "Assets/Loadable/UI/UIWidgets/Title/Icon/Title_{id}.png",
+              "Prefab": "Assets/Loadable/UI/UIWidgets/Title/Prefab/Title_{id}/2D.prefab",
+              "GamePrefab": "Assets/Loadable/UI/UIWidgets/Title/Prefab/Title_{id}/3D.prefab",
+              "PreviewPath": "Assets/Loadable/UI/UIWidgets/Title/Prefab/Title_{id}/2D.prefab"}
+  },
+  "afterImport": [
+    "Title/Icon 文件夹被 UserTitleView 图集打包:Unity 打开后图集会重新打包,.spriteatlas 的变化一起提交。",
+    "PgcId 按 39 号以后的号段 1901000NN 推的,和服务端 / 策划确认一下。",
+    "主工程的扫光(Mask + 加色材质)这里不生成,需要的话在 Unity 里加。"
+  ],
+  "rules": {
+    "requireAlpha": true,
+    "keepInputSize": true,
+    "maxBytes": 1048576,
+    "maxOutlineGrowth": 0.002
+  },
+  "ai": {
+    "refs": ["dev/restyle/templates/style_swatch.png"],
+    "prompt": "dev/restyle/prompts/切图_保主色.txt",
+    "keepShape": true
+  }
+}

@@ -1,0 +1,71 @@
+{
+ "_说明": "示例资源:主工程称号 43 号「山河知音客」的图标(304×72)和 5 个部件(位置按 Title_43/2D.prefab 换算成相对 320×120 画框左上角;主工程的扫光遮罩这里不做)。编号改成 9043 以免和主工程重名。",
+ "standard": "title",
+ "asset": {
+  "name": "称号_9043",
+  "w": 320,
+  "h": 120,
+  "preview": "图标.png",
+  "slices": [
+   {
+    "name": "图标",
+    "file": "图标.png",
+    "x": 8,
+    "y": 24
+   },
+   {
+    "name": "底板_Image_04",
+    "file": "底板_Image_04.png",
+    "x": 40.0,
+    "y": 24.0
+   },
+   {
+    "name": "边框_Image_05",
+    "file": "边框_Image_05.png",
+    "x": 51.4,
+    "y": 10.2
+   },
+   {
+    "name": "文字_Image_03",
+    "file": "文字_Image_03.png",
+    "x": 113.6,
+    "y": 62.4
+   },
+   {
+    "name": "花_Image_02",
+    "file": "花_Image_02.png",
+    "x": 205.3,
+    "y": 42.7
+   },
+   {
+    "name": "鸟_Image_01",
+    "file": "鸟_Image_01.png",
+    "x": 225.9,
+    "y": 20.1
+   }
+  ]
+ },
+ "motions": {
+  "鸟_Image_01": {
+   "preset": "shake",
+   "amp": 3.5,
+   "period": 2
+  },
+  "花_Image_02": {
+   "preset": "sway",
+   "amp": 8,
+   "period": 2
+  },
+  "文字_Image_03": {
+   "preset": "breathe",
+   "amp": 0.04,
+   "period": 2,
+   "delay": 0.5
+  }
+ },
+ "fields": {
+  "title": "山河知音客称号(示例)",
+  "desc": "通过「山河有声」扭蛋解锁<color=#FF835D>山河知音客称号</color>",
+  "scale": 0.5
+ }
+}
