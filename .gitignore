@@ -16,3 +16,7 @@ __pycache__/
 dev/_out/
 Thumbs.db
 desktop.ini
+
+# Figma 插件配对码、资源批处理的本机设置(主工程路径)
+dev/bridge_key.txt
+dev/pipeline/settings.local.json

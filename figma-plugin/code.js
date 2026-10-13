@@ -177,6 +177,8 @@ async function doExport(ids) {
 var UI_FILES = typeof __uiFiles__ !== "undefined" ? __uiFiles__ : null;
 if (figma.command === "import") {
   startImport(UI_FILES ? UI_FILES["import"] : __html__);
+} else if (figma.command === "batch") {
+  startBatch(UI_FILES ? UI_FILES.batch : __html__);
 } else {
   figma.showUI(UI_FILES ? UI_FILES.main : __html__, { width: 380, height: 540, themeColors: true });
   figma.ui.onmessage = function (msg) {
@@ -383,6 +385,86 @@ function startImport(html) {
     })();
     else if (msg.type === "close") { figma.closePlugin(); return; }
     if (job) job.then(function () { figma.ui.postMessage({ type: "ack", id: msg.id }); }, function (e) {
+      figma.ui.postMessage({ type: "error", id: msg.id, text: String((e && e.message) || e) });
+    });
+  };
+}
+
+// ================= 资源批处理:选中的资源 → 工作台中转箱;工作台处理完的新切图 → 摆回 Figma =================
+// 选中的每个节点 = 一个资源(如「头像框_40」):它的直接子图层各导出一张切图(带相对资源左上角的位置),没有子图层就把它自己当一张切图。
+// 网络请求都在 batch.html 里发(只能访问本机 localhost:8791,见 manifest 的 devAllowedDomains),这里只负责读写图层。
+function pngSize(bytes) {   // PNG 头里的宽高(IHDR,大端)
+  var r = function (o) { return ((bytes[o] << 24) | (bytes[o + 1] << 16) | (bytes[o + 2] << 8) | bytes[o + 3]) >>> 0; };
+  return { w: r(16), h: r(20) };
+}
+
+function boxOf(n) {
+  return n.absoluteRenderBounds || n.absoluteBoundingBox || { x: n.x, y: n.y, width: n.width, height: n.height };
+}
+
+async function collectAssets() {
+  var sel = figma.currentPage.selection;
+  if (!sel.length) throw new Error("先在画布上选中要处理的资源(每个资源一个画框 / 分组)");
+  var assets = [];
+  for (var i = 0; i < sel.length; i++) {
+    var a = sel[i], ab = boxOf(a);
+    var parts = ("children" in a && a.children.length) ? a.children.filter(function (c) { return c.visible; }) : [a];
+    var preview = await a.exportAsync({ format: "PNG", constraint: { type: "SCALE", value: 1 } });
+    var slices = [];
+    for (var k = 0; k < parts.length; k++) {
+      var p = parts[k];
+      figma.ui.postMessage({ type: "progress", text: "导出 " + a.name + " / " + p.name + "(" + (k + 1) + "/" + parts.length + ")" });
+      var bytes = await p.exportAsync({ format: "PNG", constraint: { type: "SCALE", value: 1 } });
+      var sz = pngSize(bytes), pb = boxOf(p);
+      slices.push({ name: p.name, nodeId: p.id, x: Math.round(pb.x - ab.x), y: Math.round(pb.y - ab.y), w: sz.w, h: sz.h, png: figma.base64Encode(bytes) });
+    }
+    var psz = pngSize(preview);
+    assets.push({ name: a.name, nodeId: a.id, w: psz.w, h: psz.h, preview: figma.base64Encode(preview), slices: slices });
+  }
+  return assets;
+}
+
+async function placeResults(result) {
+  var made = [];
+  for (var i = 0; i < result.assets.length; i++) {
+    var a = result.assets[i];
+    var src = a.nodeId ? await figma.getNodeByIdAsync(a.nodeId) : null;
+    var f = figma.createFrame();
+    f.name = a.name + " · " + result.name; f.resize(Math.max(1, a.w), Math.max(1, a.h)); f.fills = []; f.clipsContent = false;
+    var parent = src && src.parent && src.parent.type !== "DOCUMENT" ? src.parent : figma.currentPage;
+    parent.appendChild(f);
+    if (src) { f.x = src.x + src.width + 60; f.y = src.y; }
+    else { f.x = figma.viewport.center.x; f.y = figma.viewport.center.y + i * (a.h + 60); }
+    for (var k = 0; k < a.slices.length; k++) {
+      var s = a.slices[k], r = figma.createRectangle();
+      r.name = s.name + (s.isNew ? "" : "(原图)"); r.resize(Math.max(1, s.w), Math.max(1, s.h)); r.x = s.x; r.y = s.y;
+      r.fills = [{ type: "IMAGE", scaleMode: "FILL", imageHash: figma.createImage(figma.base64Decode(s.png)).hash }];
+      f.appendChild(r);
+    }
+    made.push(f);
+  }
+  if (made.length) { figma.currentPage.selection = made; figma.viewport.scrollAndZoomIntoView(made); }
+  return made.length;
+}
+
+function startBatch(html) {
+  figma.showUI(html, { width: 400, height: 580, themeColors: true });
+  var sendSel = function () {
+    figma.ui.postMessage({ type: "selection", items: figma.currentPage.selection.map(function (n) {
+      return { name: n.name, w: Math.round(n.width), h: Math.round(n.height), parts: ("children" in n) ? n.children.length : 0 };
+    }) });
+  };
+  figma.clientStorage.getAsync("budui_bridge").then(function (cfg) {
+    figma.ui.postMessage({ type: "init", cfg: cfg || {}, file: figma.root.name }); sendSel();
+  });
+  figma.on("selectionchange", sendSel);
+  figma.ui.onmessage = function (msg) {
+    var job = null;
+    if (msg.type === "saveCfg") job = figma.clientStorage.setAsync("budui_bridge", msg.cfg).then(function () { return {}; });
+    else if (msg.type === "collect") job = collectAssets().then(function (assets) { return { assets: assets, file: figma.root.name, page: figma.currentPage.name }; });
+    else if (msg.type === "place") job = placeResults(msg.result).then(function (n) { return { frames: n }; });
+    else if (msg.type === "close") { figma.closePlugin(); return; }
+    if (job) job.then(function (data) { figma.ui.postMessage({ type: "ack", id: msg.id, data: data }); }, function (e) {
       figma.ui.postMessage({ type: "error", id: msg.id, text: String((e && e.message) || e) });
     });
   };

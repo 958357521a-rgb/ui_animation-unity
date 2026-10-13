@@ -1,6 +1,7 @@
 # CLAUDE.md — BUD UI Studio(预制体工作台软件)
 
 > **新同事 / 新电脑第一次打开:先读 `ONBOARDING.md`**(环境检查、启动工作台、载入工程、怎么操作这个系统、Claude 操作守则),按「第一次打开」一节做。
+> **资源批处理是原作者(UI)先行跑的暂定版**:接手的同事拉取仓库后,第一次打开时先按 `docs/资源批处理_暂定规范.md` 文末「审核步骤」逐条审核这些规范和规则(只读核对她的主工程,结论写进该文件的「审核记录」,拿不准的列出来问她),再用 `docs/资源批处理_使用说明.md` 和 `samples/`(`python dev/pipeline_demo.py --job`)带她把流程走一遍。
 > **每个新会话都读 `HANDOFF.md`**:当前进度、下一步、待原作者拍板的事、踩过的坑都在里面。
 > **接手的电脑上没有原作者的 Claude 记忆**:原作者拍过板的决定、覆盖主工程和 AI 重绘踩过的坑整理在 `docs/经验与决定.md`,动手前读。新电脑先让用户双击 `安装与自检.bat`(= `python dev/setup_check.py`)。工作台通过私有 GitHub 仓库分发,`.gitignore` 排除了 `projects/`(工程文件含美术资源)、`backups/`、`exports/`、本机口令和 `dev/restyle/models.local.json`。AI 重绘的 ComfyUI 和模型不随仓库分发,由各自电脑上的 Claude 按本机配置装(`ONBOARDING.md`「7. AI 重绘」)。
 > 本文件和 `HANDOFF.md` 里的绝对路径(`E:\BUDGCB\BUD_CHINA` 等)是原作者电脑上的;在别的电脑上先问用户主工程在哪。
@@ -30,6 +31,7 @@
 - 点击后行为(`clickAction`: event/openPage/openPopup/toggle/show/hide/mask;跳页用 `clickTargetPage`,其余用 `clickTarget`)导出到 View:目标 GameObject/Text 字段在 prefab 里按 fileID 接好(`nodeFids`);`hiddenByDefault` 导出为 `m_IsActive: 0`。原来的 PressEffect 已被 `ClickFeedback`(preset 0-4)取代。
 - **多任务**(2026-10-09 原作者要求:充值福利只是其中一个改版任务,要能新建任务导入别的素材、配动效、覆盖,并方便管理):一个任务 = 一个模块的完整工程。IndexedDB(库 `budui`/表 `kv`):键 `tasks` = 任务目录(名称、模块名、备注、进行中/已完成、回收站 `deleted`、页数/节点数、缩略图 `thumb`、最近导出 `exported`、最近覆盖 `unity:{prefab,time}`),键 `task:<id>` = `{module, proj}`;`patchTask` 在一个事务里读改写目录。`autosave` 防抖 400ms → `saveNow`(只有 `taskDirty` 才写),切任务 / 打开任务首页前先 `saveNow`。`applyTask` 装载任务时清撤销记录、选中、底图、试玩,Figma 链接按任务存在 `proj.figmaUrl`。旧版单工程(键 `project`、更旧的 localStorage `budui_autosave`)在目录为空时迁移成第一个任务,原键不删。当前任务 id:sessionStorage `budui_task`(每个标签页各自)→ localStorage `budui_lastTask`。**同一任务只让一个窗口保存**:`BroadcastChannel("budui-tasks")`,后打开的窗口收到 `here` 就只读(画布上方黄条,`takeOverTask` 重读后 `claim` 接手)。「载入工程」= 新建一个任务(当前任务空白时装进当前任务);「保存工程」文件里带 `taskName/taskNote`。删除先进回收站,「彻底删除」才删 `task:<id>`。**注意 `window.__test_build()` 会替换当前工程,画布上有用户数据时不要跑。**
 - 一键配动效/交互:工具栏按钮 `autoConfigure()` 作用于**模块全部页面**(原作者要求统一配):先 `resetAuto` 复位所有页,再按 `proj.pages` 顺序逐页配置(先复位是为了让标识去重结果与整体导入时一致),最后 `autoLinkPages`;`autoConfigure(true)` 是导入时只配当前页。每页 = `autoInteract`(返回=关闭、滚动区卡片/CTA/规则链接/显隐可点击、卡片文字与金额档位文字动态、中文图层名经 `CN_WORDS` 转英文标识)+ `autoMotion`(背景淡入、卡片 0.2s 起每张 +55ms、进度条 growX、叠在底板上的元素与底板同步)。单行文字导出为不折行(`singleLine`),因为白名单没有 Bold,粗体映射到更宽的 Heavy。
+- **资源批处理**(2026-10-13 原作者要求:批量处理头像框 / 主页皮肤这类切好图的资源,按标准和参考 AI 重绘、一键加晃动 / 变色动效、出可提交的 unitypackage;先搭框架、细节后补):`pipeline.html` + `dev/pipeline/`(说明 `dev/pipeline/README.md`)。原作者选的方案:接 Figma = 自己的插件(命令 `batch`)+ 本地服务中转箱 `/api/bridge/*`(只认本机 + 配对码 `dev/bridge_key.txt`);处理 = AI 重绘 + 规则检查;进主工程 = 新增 + 替换;动效 = Animator 动画片段(和主工程现有头像框特效一样,不加脚本)。生成器 `dev/pipeline/unity_yaml.py` 逐字段对齐主工程 `HeadTopEffect_36` 及其 .anim / .controller,改前先对照主工程;动画绑定按节点名 CRC32,节点名和部件图名必须是英文。每类资源一个「标准」`dev/pipeline/standards/*.json`(落点、角色、尺寸规则、AI 参考、默认动效、配置条目模板),配置文件不自动改、README 给条目。改了生成器跑 `python dev/pipeline_selftest.py`,改了插件跑 `node dev/plugin_batch_selftest.js`;改了 Unity 资产格式最好再导入空白 Unity 工程实测一次。
 - 内置浏览器面板打开 file:// 得到的是 data: 静态快照(没有 localStorage / IndexedDB):不能当正式工作环境,但正好当隔离测试沙盒;正式使用走本地服务(见顶部「预览」,本文件夹的 `.claude/launch.json` 已配好)。
 
 ## 相关资料

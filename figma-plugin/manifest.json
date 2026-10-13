@@ -3,14 +3,37 @@
   "id": "bud-ui-studio-export",
   "api": "1.0.0",
   "main": "code.js",
-  "ui": { "main": "ui.html", "import": "import.html" },
+  "ui": {
+    "main": "ui.html",
+    "import": "import.html",
+    "batch": "batch.html"
+  },
   "menu": [
-    { "name": "导出给工作台(选中界面 → .budfig.json)", "command": "export" },
-    { "name": "从工作台导入(工程 → 图层)", "command": "import" }
+    {
+      "name": "导出给工作台(选中界面 → .budfig.json)",
+      "command": "export"
+    },
+    {
+      "name": "从工作台导入(工程 → 图层)",
+      "command": "import"
+    },
+    {
+      "name": "资源批处理(发送切图到工作台 / 取回处理结果)",
+      "command": "batch"
+    }
   ],
-  "editorType": ["figma"],
+  "editorType": [
+    "figma"
+  ],
   "documentAccess": "dynamic-page",
   "networkAccess": {
-    "allowedDomains": ["none"]
+    "allowedDomains": [
+      "none"
+    ],
+    "devAllowedDomains": [
+      "http://localhost:8791",
+      "http://127.0.0.1:8791"
+    ],
+    "reasoning": "资源批处理命令只和本机的 BUD UI Studio 工作台服务(localhost:8791)收发切图,不访问外网"
   }
 }

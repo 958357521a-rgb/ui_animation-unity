@@ -1,0 +1,112 @@
+{
+ "_说明": "示例资源:主工程头像框 36 号的底框、预览图和 8 个上层部件(位置按主工程 HeadTopEffect_36 换算成「相对 256×256 画框左上角」),资源名改成 头像框_9036 以免和主工程已有的 36 号重名。python dev/pipeline_demo.py 会把它当成 Figma 插件发来的一批切图;加 --job 直接建好示例任务(带动效和 AI 示例图)。",
+ "standard": "avatar_frame",
+ "asset": {
+  "name": "头像框_9036",
+  "w": 256,
+  "h": 256,
+  "preview": "底框.png",
+  "slices": [
+   {
+    "name": "底框",
+    "file": "底框.png",
+    "x": 0,
+    "y": 0
+   },
+   {
+    "name": "预览",
+    "file": "预览.png",
+    "x": 28,
+    "y": 31
+   },
+   {
+    "name": "上_Image_01",
+    "file": "上_Image_01.png",
+    "x": 152,
+    "y": 48
+   },
+   {
+    "name": "上_Image_03",
+    "file": "上_Image_03.png",
+    "x": 121,
+    "y": 219
+   },
+   {
+    "name": "上_Image_07",
+    "file": "上_Image_07.png",
+    "x": 73,
+    "y": 45
+   },
+   {
+    "name": "上_Image_04",
+    "file": "上_Image_04.png",
+    "x": 31,
+    "y": 128
+   },
+   {
+    "name": "上_Image_06",
+    "file": "上_Image_06.png",
+    "x": 50,
+    "y": 59
+   },
+   {
+    "name": "上_Image_05",
+    "file": "上_Image_05.png",
+    "x": 170,
+    "y": 122
+   },
+   {
+    "name": "上_Image_08",
+    "file": "上_Image_08.png",
+    "x": 33,
+    "y": 145
+   },
+   {
+    "name": "上_Image_02",
+    "file": "上_Image_02.png",
+    "x": 151,
+    "y": 33
+   }
+  ]
+ },
+ "motions": {
+  "上_Image_01": {
+   "preset": "sway",
+   "amp": 8,
+   "period": 2
+  },
+  "上_Image_02": {
+   "preset": "sway",
+   "amp": 6,
+   "period": 2,
+   "delay": 0.5
+  },
+  "上_Image_07": {
+   "preset": "tint",
+   "amp": 1,
+   "period": 2,
+   "color": "#ff6fa8"
+  },
+  "上_Image_04": {
+   "preset": "blink",
+   "amp": 0.6,
+   "period": 1
+  },
+  "上_Image_08": {
+   "preset": "breathe",
+   "amp": 0.08,
+   "period": 2
+  },
+  "上_Image_05": {
+   "preset": "float",
+   "amp": 4,
+   "period": 2,
+   "delay": 0.25
+  }
+ },
+ "ai_examples": {
+  "上_Image_01": "ai_examples/上_Image_01.png",
+  "上_Image_07": "ai_examples/上_Image_07.png",
+  "上_Image_08": "ai_examples/上_Image_08.png"
+ }
+}

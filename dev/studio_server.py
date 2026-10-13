@@ -13,6 +13,10 @@
 # --lan:监听所有网卡,同一局域网的同事用 http://<本机局域网 IP>:<端口>/ 直接打开工作台(工程存在各自浏览器里)。
 #   别的电脑只能读工作台页面、projects/ 工程文件、figma-plugin/、docs/、README.md;
 #   写接口(覆盖到 Unity、写回工程、另存交付包)和其余文件(backups/、dev/、主工程相关)只认本机(127.0.0.1)。
+# 资源批处理(pipeline.html,逻辑在 dev/pipeline/core.py):
+#   POST /api/pipeline/<动作>:只认本机工作台页面(同「覆盖到 Unity」的口令 / Origin 校验);
+#   /api/bridge/*:Figma 插件「资源批处理」命令和工作台之间的中转箱(插件把选中的切图发进来、把处理结果取回去),
+#   只认本机 + 配对码(请求头 X-BudUI-Bridge = dev/bridge_key.txt,第一次用时生成,在批处理页面上显示,插件里填一次)。
 import base64, datetime, glob, http.server, json, os, re, secrets, shutil, socket, sys, urllib.parse
 
 # pythonw 启动(桌面应用在后台无窗口起服务)时没有控制台,stdout/stderr 是 None:请求日志一写就抛异常、连接被掐断
@@ -26,6 +30,7 @@ for _stream in (sys.stdout, sys.stderr):
         pass
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, "dev", "pipeline"))   # 资源批处理核心(用到时才 import:没装 Pillow 也不影响工作台其他功能)
 PROJECTS = os.path.join(ROOT, "projects")
 EXPORTS = os.path.join(ROOT, "exports")
 BACKUPS = os.path.join(ROOT, "backups")
@@ -422,13 +427,15 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def end_headers(self):
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-BudUI-Token")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-BudUI-Token, X-BudUI-Bridge")
         self.send_header("Access-Control-Allow-Private-Network", "true")   # Chrome/Edge:file:// 页面访问本机服务要这个许可
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Cache-Control", "no-cache")   # 每次都向服务确认是否有新版,工作台更新后不会拿到浏览器缓存的旧页面
         super().end_headers()
 
     def do_GET(self):
+        if self.path.startswith("/api/bridge/"):
+            return self.do_bridge("GET")
         if urllib.parse.urlparse(self.path).path == "/api/projects":   # 工作台「从共享文件夹载入」:列出 projects/ 里的工程文件
             items = [{"name": os.path.basename(f), "bytes": os.path.getsize(f), "mtime": int(os.path.getmtime(f) * 1000)}
                      for f in glob.glob(os.path.join(PROJECTS, "*.budui.json"))]
@@ -508,9 +515,65 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         except (ValueError, OSError) as e:
             return self.reply(400, {"error": str(e)})
 
+    def do_bridge(self, method):
+        """Figma 插件 ↔ 工作台中转箱:只认本机 + 配对码"""
+        import pipeline_core as pc
+        if not self.is_local():
+            return self.reply(403, {"error": "中转箱只给本机的 Figma 插件用"})
+        if not secrets.compare_digest(self.headers.get("X-BudUI-Bridge", ""), pc.bridge_key()):
+            return self.reply(403, {"error": "配对码不对:在工作台「资源批处理」页面右上角看配对码,填进 Figma 插件"})
+        path = urllib.parse.urlparse(self.path).path
+        try:
+            if method == "GET" and path == "/api/bridge/ping":
+                return self.reply(200, {"ok": True, "name": "BUD UI Studio"})
+            if method == "GET" and path == "/api/bridge/outbox":
+                return self.reply(200, {"items": pc.bridge_outbox()})
+            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}") if method == "POST" else {}
+            if method == "POST" and path == "/api/bridge/inbox":
+                return self.reply(200, pc.bridge_inbox_add(body))
+            if method == "POST" and path == "/api/bridge/outbox/done":
+                return self.reply(200, pc.bridge_outbox_done(body.get("job", "")))
+        except (ValueError, KeyError, OSError) as e:
+            return self.reply(400, {"error": str(e)})
+        return self.reply(404)
+
+    def do_pipeline(self, action):
+        """资源批处理页面的接口:只认本机工作台页面"""
+        import pipeline_core as pc
+        if not self.trusted():
+            return self.reply(403, {"error": "只接受本机工作台页面的请求(直接打开的页面要先刷新拿到本次服务的口令)"})
+        try:
+            q = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
+            jid = q.get("job")
+            fn = {
+                "info": lambda: {"key": pc.bridge_key(), "settings": pc.settings(), "standards": pc.standards(), "presets": pc.uy.PRESETS},
+                "settings": lambda: pc.settings(q.get("settings") or {}),
+                "jobs": lambda: {"items": pc.list_jobs()},
+                "job": lambda: pc.load(jid),
+                "create": lambda: pc.create_job(q.get("name"), q.get("standard"), q.get("mode", "new")),
+                "delete": lambda: pc.delete_job(jid),
+                "inbox": lambda: {"items": pc.bridge_inbox_list()},
+                "import": lambda: pc.import_inbox(jid, q.get("inbox")),
+                "upload": lambda: pc.add_upload(jid, q.get("name"), q.get("files") or []),
+                "update": lambda: pc.update(jid, q.get("patch") or {}),
+                "ai": lambda: pc.run_ai(jid, q.get("only")),
+                "check": lambda: pc.check(jid),
+                "build": lambda: pc.build(jid),
+                "push": lambda: pc.push_outbox(jid),
+            }.get(action)
+            if not fn:
+                return self.reply(404, {"error": "没有这个动作:" + action})
+            return self.reply(200, fn())
+        except (ValueError, KeyError, OSError, StopIteration) as e:
+            return self.reply(400, {"error": str(e) or type(e).__name__})
+
     def do_POST(self):
         global saved
         url = urllib.parse.urlparse(self.path)
+        if url.path.startswith("/api/bridge/"):
+            return self.do_bridge("POST")
+        if url.path.startswith("/api/pipeline/") and self.is_local():
+            return self.do_pipeline(url.path[len("/api/pipeline/"):])
         if not self.is_local():   # 局域网共享时:写主工程、写文件夹的接口只给主机自己用
             return self.reply(403, {"error": "局域网打开的工作台不能用这个功能:覆盖到 Unity、写回工程只能在共享工作台的那台电脑上操作。可以「导出交付包」或「保存工程」发给对方。"})
         if url.path in ("/api/unity/search", "/api/unity/match", "/api/unity/scan", "/api/unity/apply", "/api/unity/sprites", "/api/unity/file"):

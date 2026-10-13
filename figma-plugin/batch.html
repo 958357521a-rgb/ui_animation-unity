@@ -1,0 +1,87 @@
+<!-- BUD UI Studio 插件 · 「资源批处理」界面:把选中的资源(每个子图层一张切图)发到本机工作台;把工作台处理好的新切图取回来摆在原资源旁边 -->
+<style>
+  body { font: 12px/1.6 -apple-system, "Microsoft YaHei", sans-serif; margin: 0; padding: 14px; color: var(--figma-color-text); background: var(--figma-color-bg); }
+  h3 { margin: 0 0 6px; font-size: 14px; }
+  .hint { color: var(--figma-color-text-secondary); margin-bottom: 8px; }
+  label { display: block; margin: 8px 0 3px; font-weight: 600; }
+  input[type=text] { width: 100%; box-sizing: border-box; padding: 6px 8px; border: 1px solid var(--figma-color-border); border-radius: 6px; background: var(--figma-color-bg); color: inherit; }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .row input { flex: 1; }
+  .box { max-height: 130px; overflow: auto; border: 1px solid var(--figma-color-border); border-radius: 6px; padding: 6px 8px; margin-top: 6px; }
+  .box div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  button { margin-top: 10px; padding: 8px 14px; border: 0; border-radius: 6px; background: var(--figma-color-bg-brand); color: #fff; font-weight: 600; cursor: pointer; }
+  button[disabled] { opacity: .45; cursor: default; }
+  button.sec { background: none; color: inherit; border: 1px solid var(--figma-color-border); }
+  #log { margin-top: 10px; white-space: pre-wrap; color: var(--figma-color-text-secondary); max-height: 150px; overflow: auto; }
+  .err { color: var(--figma-color-text-danger); }
+  .okc { color: var(--figma-color-text-success); }
+</style>
+<h3>资源批处理</h3>
+<div class="hint">把选中的资源发到工作台(每个资源 = 一个画框或分组,里面每个子图层是一张切图),在工作台里 AI 重绘、配动效、生成 unitypackage;处理完点「取回结果」,新切图会摆在原资源右边。工作台要开着(桌面「BUD UI Studio」)。</div>
+<label>工作台地址 / 配对码</label>
+<div class="row"><input type="text" id="server" value="http://localhost:8791"><input type="text" id="key" placeholder="8 位配对码" style="flex:0 0 96px"></div>
+<div class="hint">配对码在工作台「资源批处理」页面右上角。</div>
+<button class="sec" id="test">测试连接</button>
+<label>当前选中</label>
+<div class="box" id="sel">(没有选中)</div>
+<button id="send" disabled>发送选中的资源到工作台</button>
+<button class="sec" id="fetch">取回处理结果</button>
+<button class="sec" id="close">关闭</button>
+<div id="log"></div>
+<script>
+const $ = s => document.querySelector(s);
+const log = (t, cls) => { const d = document.createElement("div"); if (cls) d.className = cls; d.textContent = t; $("#log").appendChild(d); $("#log").scrollTop = 1e9; };
+let seq = 0, selCount = 0;
+const waiters = {};
+const call = msg => new Promise((ok, bad) => { msg.id = ++seq; waiters[msg.id] = [ok, bad]; parent.postMessage({ pluginMessage: msg }, "*"); });
+const cfg = () => ({ server: $("#server").value.trim().replace(/\/+$/, ""), key: $("#key").value.trim() });
+async function api(path, body) {
+  const c = cfg();
+  const r = await fetch(c.server + path, { method: body ? "POST" : "GET", headers: Object.assign({ "X-BudUI-Bridge": c.key }, body ? { "Content-Type": "application/json" } : {}), body: body ? JSON.stringify(body) : undefined });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || ("HTTP " + r.status));
+  return j;
+}
+const saveCfg = () => call({ type: "saveCfg", cfg: cfg() }).catch(() => {});
+onmessage = e => {
+  const m = e.data.pluginMessage; if (!m) return;
+  if (m.type === "init") { if (m.cfg.server) $("#server").value = m.cfg.server; if (m.cfg.key) $("#key").value = m.cfg.key; }
+  else if (m.type === "selection") {
+    selCount = m.items.length; $("#send").disabled = !selCount;
+    $("#sel").innerHTML = ""; if (!selCount) $("#sel").textContent = "(没有选中)";
+    m.items.forEach(it => { const d = document.createElement("div"); d.textContent = `${it.name}  ${it.w}×${it.h} · ${it.parts ? it.parts + " 个子图层" : "单张"}`; $("#sel").appendChild(d); });
+    $("#send").textContent = selCount ? `发送选中的 ${selCount} 个资源到工作台` : "发送选中的资源到工作台";
+  }
+  else if (m.type === "progress") { const l = $("#log").lastChild; if (l && l.dataset.p) l.textContent = m.text; else { log(m.text); $("#log").lastChild.dataset.p = 1; } }
+  else if (m.type === "ack" || m.type === "error") { const w = waiters[m.id]; delete waiters[m.id]; if (w) m.type === "ack" ? w[0](m.data) : w[1](new Error(m.text)); }
+};
+$("#test").onclick = async () => {
+  try { await api("/api/bridge/ping"); log("✓ 连上了工作台", "okc"); saveCfg(); }
+  catch (e) { log("✗ 连不上:" + e.message + "(工作台开着吗?配对码对吗?)", "err"); }
+};
+$("#send").onclick = async () => {
+  $("#send").disabled = true;
+  try {
+    const got = await call({ type: "collect" });
+    const n = got.assets.reduce((s, a) => s + a.slices.length, 0);
+    log(`上传 ${got.assets.length} 个资源、${n} 张切图…`);
+    const r = await api("/api/bridge/inbox", got);
+    log(`✓ 已发到工作台中转箱(${r.assets} 个资源、${r.slices} 张切图):到工作台「资源批处理」里点「从 Figma 收件」`, "okc"); saveCfg();
+  } catch (e) { log("✗ " + e.message, "err"); }
+  $("#send").disabled = !selCount;
+};
+$("#fetch").onclick = async () => {
+  try {
+    const r = await api("/api/bridge/outbox");
+    if (!r.items.length) return log("工作台还没有放回来的结果:在工作台「资源批处理」里点「放回 Figma」");
+    for (const it of r.items) {
+      log(`摆放「${it.name}」的 ${it.assets.length} 个资源…`);
+      const p = await call({ type: "place", result: it });
+      await api("/api/bridge/outbox/done", { job: it.job });
+      log(`✓ 「${it.name}」:放好 ${p.frames} 个画框(在原资源右边)`, "okc");
+    }
+    saveCfg();
+  } catch (e) { log("✗ " + e.message, "err"); }
+};
+$("#close").onclick = () => parent.postMessage({ pluginMessage: { type: "close" } }, "*");
+</script>

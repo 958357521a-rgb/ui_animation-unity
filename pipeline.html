@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>资源批处理 · BUD UI Studio</title>
+<!-- 资源批处理:Figma 插件发来的切图(或本地 PNG)→ AI 重绘 → 规则检查 → 配动效 → 生成 .unitypackage / 放回 Figma。
+     逻辑在本地服务(dev/studio_server.py 的 /api/pipeline/*,核心 dev/pipeline/pipeline_core.py),这个页面只管展示和操作。
+     http://localhost:8791/pipeline.html 或直接双击打开都行(双击打开时和工作台一样靠 dev/local_token_<端口>.js 的口令连本地服务)。 -->
+<style>
+  :root{--bg:#17171d;--panel:#1f1f28;--panel2:#26262f;--line:#34343f;--ink:#e8e8f0;--dim:#9a9aac;--acc:#8b7bff;--ok:#4cd07d;--warn:#ffb454;--err:#ff6b6b;}
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;background:var(--bg);color:var(--ink);font:13px/1.5 "Source Han Sans CN","思源黑体 CN","Noto Sans SC","Microsoft YaHei",sans-serif}
+  body{display:flex;flex-direction:column;overflow:hidden}
+  button{background:var(--panel2);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:5px 12px;cursor:pointer;font:inherit;white-space:nowrap}
+  button:hover{border-color:var(--acc)} button.primary{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:600}
+  button[disabled]{opacity:.45;cursor:default}
+  input,select{background:var(--panel2);color:var(--ink);border:1px solid var(--line);border-radius:5px;padding:4px 8px;font:inherit}
+  input[type=checkbox]{width:auto}
+  header{display:flex;align-items:center;gap:10px;padding:8px 14px;background:var(--panel);border-bottom:1px solid var(--line);flex:none;flex-wrap:wrap}
+  header .logo{font-weight:800;color:var(--acc)}
+  .chip{background:var(--panel2);border:1px solid var(--line);color:var(--dim);border-radius:99px;padding:2px 10px;font-size:12px;white-space:nowrap}
+  .chip b{color:var(--ink);letter-spacing:1px}
+  .grow{flex:1}
+  main{flex:1;display:flex;min-height:0}
+  aside{width:250px;flex:none;border-right:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;min-height:0}
+  aside h4,section h4{font-size:12px;color:var(--dim);font-weight:600;margin:12px 12px 6px}
+  #jobs{overflow:auto;flex:1}
+  .job{padding:8px 12px;border-left:3px solid transparent;cursor:pointer}
+  .job:hover{background:var(--panel2)} .job.on{background:var(--panel2);border-left-color:var(--acc)}
+  .job .t{font-weight:600} .job .s{color:var(--dim);font-size:12px}
+  .newjob{padding:10px 12px;border-top:1px solid var(--line);display:grid;gap:6px}
+  #view{flex:1;overflow:auto;padding:14px 18px 40px}
+  .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0 12px}
+  .note{color:var(--dim);font-size:12px}
+  .asset{background:var(--panel);border:1px solid var(--line);border-radius:10px;margin-bottom:14px;overflow:hidden}
+  .ahead{display:flex;gap:10px;align-items:center;padding:10px 12px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .ahead .n{font-weight:700;font-size:14px}
+  .abody{display:flex;gap:14px;padding:10px 12px;align-items:flex-start}
+  .stage{flex:none;position:relative;background:repeating-conic-gradient(#2b2b35 0 25%,#23232c 0 50%) 0 0/16px 16px;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .stage .ly{position:absolute;transform-origin:50% 50%}
+  .stage .ly img,.thumb img{width:100%;height:100%;display:block}
+  .tintov{position:absolute;inset:0;mix-blend-mode:multiply;opacity:0;-webkit-mask-size:100% 100%;mask-size:100% 100%}
+  table{border-collapse:collapse;width:100%}
+  th{font-weight:600;color:var(--dim);font-size:12px;text-align:left;padding:4px 6px;border-bottom:1px solid var(--line)}
+  td{padding:5px 6px;border-bottom:1px solid #2b2b35;vertical-align:middle}
+  .thumb{width:56px;height:56px;background:repeating-conic-gradient(#2b2b35 0 25%,#23232c 0 50%) 0 0/10px 10px;border-radius:5px;overflow:hidden;display:flex;align-items:center;justify-content:center}
+  .thumb img{object-fit:contain}
+  .st{font-size:12px;border-radius:99px;padding:1px 8px;background:var(--panel2);color:var(--dim)}
+  .st.done{color:var(--ok)} .st.failed{color:var(--err)} .st.running,.st.queued{color:var(--warn)}
+  .iss{font-size:12px;margin-top:2px} .iss.error{color:var(--err)} .iss.warn{color:var(--warn)}
+  .mot{display:flex;gap:4px;align-items:center;flex-wrap:wrap}
+  .mot input[type=number]{width:62px} .mot input[type=color]{width:34px;height:26px;padding:1px}
+  .rp{width:100%;min-width:260px}
+  #toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#000c;color:#fff;padding:8px 16px;border-radius:8px;display:none;max-width:80vw;z-index:9}
+  dialog{background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:16px;max-width:560px;width:90vw}
+  dialog::backdrop{background:#0008}
+  .pick{display:block;width:100%;text-align:left;margin-top:6px}
+  .empty{color:var(--dim);padding:40px 0;text-align:center}
+</style>
+</head>
+<body>
+<header>
+  <span class="logo">BUD UI Studio · 资源批处理</span>
+  <span class="note">Figma 切图 → AI 重绘 → 规则检查 → 配动效 → unitypackage / 放回 Figma</span>
+  <span class="grow"></span>
+  <span class="chip" id="keyChip" title="Figma 插件「资源批处理」里填这个配对码;点一下复制">配对码 <b id="key">…</b></span>
+  <span class="chip">主工程</span><input id="unityRoot" style="width:260px" placeholder="E:\BUDGCB\BUD_CHINA(含 Assets 的那层)">
+  <button id="saveRoot">保存</button>
+  <a href="BUD_UI_Studio.html"><button>← 回到工作台</button></a>
+</header>
+<main>
+  <aside>
+    <h4>批处理任务</h4>
+    <div id="jobs"></div>
+    <div class="newjob">
+      <b>＋ 新建任务</b>
+      <input id="nName" placeholder="任务名(如:S10 头像框一批)">
+      <select id="nStd"></select>
+      <select id="nMode"><option value="new">新增(新编号的资源)</option><option value="replace">替换(原地换掉已有的图)</option></select>
+      <button class="primary" id="nGo">新建</button>
+    </div>
+  </aside>
+  <section id="view"><div class="empty">左边选一个任务,或新建一个</div></section>
+</main>
+<div id="toast"></div>
+<dialog id="dlg"><div id="dlgBody"></div><div style="text-align:right;margin-top:12px"><button onclick="dlg.close()">关闭</button></div></dialog>
+<input type="file" id="files" multiple accept=".png" hidden>
+<script>
+const STUDIO_PORT = 8791;
+const $ = s => document.querySelector(s);
+const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+let SVC = null, INFO = null, JOB = null, pollT = null;
+const toast = (t, ms) => { const e = $("#toast"); e.textContent = t; e.style.display = "block"; clearTimeout(e._t); e._t = setTimeout(() => e.style.display = "none", ms || 3500); };
+const show = html => { $("#dlgBody").innerHTML = html; $("#dlg").showModal(); };
+// 页面内的输入 / 确认框(内置浏览器面板会吞掉原生 prompt / confirm)
+const ask = (title, def, okText) => new Promise(res => {
+  show(`<b>${esc(title)}</b>${def != null ? `<input id="askIn" value="${esc(def)}" style="width:100%;margin-top:10px">` : ""}<div style="margin-top:12px"><button class="primary" id="askOk">${esc(okText || "确定")}</button></div>`);
+  const done = v => { $("#dlg").close(); res(v); };
+  $("#askOk").onclick = () => done(def != null ? $("#askIn").value.trim() : true);
+  if (def != null){ $("#askIn").focus(); $("#askIn").onkeydown = e => { if (e.key === "Enter") $("#askOk").click(); }; }
+  $("#dlg").addEventListener("close", () => res(null), {once: true});
+});
+
+// 本地服务:http 打开时同源;双击打开(file://)时读本机口令文件,和工作台「覆盖到 Unity」同一套
+function service(){
+  if (SVC) return Promise.resolve(SVC);
+  if (location.protocol !== "file:") return Promise.resolve(SVC = {base: "", token: ""});
+  return new Promise(res => {
+    const s = document.createElement("script"), done = () => { s.remove(); const v = window.__BUDUI_SERVICE; res(SVC = v ? {base: `http://localhost:${v.port}`, token: v.token} : null); };
+    window.__BUDUI_SERVICE = null; s.src = `dev/local_token_${STUDIO_PORT}.js`; s.onload = done; s.onerror = done; document.head.appendChild(s);
+  });
+}
+async function api(action, body){
+  const svc = await service();
+  if (!svc) throw new Error("连不上本地服务:双击桌面「BUD UI Studio」(会在后台启动服务),再刷新这个页面");
+  const r = await fetch(`${svc.base}/api/pipeline/${action}`, {method: "POST", headers: {"Content-Type": "application/json", "X-BudUI-Token": svc.token}, body: JSON.stringify(body || {})});
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || `HTTP ${r.status}(服务是旧版的话重启一下)`);
+  return j;
+}
+const run = async (fn, okText) => { try { const r = await fn(); if (okText) toast(okText); return r; } catch (e) { show(`<b style="color:var(--err)">没做成</b><p style="margin-top:8px">${esc(e.message)}</p>`); } };
+const fileUrl = rel => `${SVC ? SVC.base : ""}/exports/pipeline/${JOB.id}/${encodeURI(rel)}?t=${encodeURIComponent(JOB.updated || "")}`;
+
+async function boot(){
+  INFO = await run(() => api("info"));
+  if (!INFO) return;
+  $("#key").textContent = INFO.key;
+  $("#unityRoot").value = INFO.settings.unityRoot || "";
+  $("#nStd").innerHTML = INFO.standards.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join("");
+  await loadJobs();
+}
+$("#keyChip").onclick = () => navigator.clipboard.writeText(INFO.key).then(() => toast("配对码已复制,填进 Figma 插件「资源批处理」"));
+$("#saveRoot").onclick = () => run(() => api("settings", {settings: {unityRoot: $("#unityRoot").value}}), "主工程路径已保存");
+$("#nGo").onclick = () => run(async () => { const j = await api("create", {name: $("#nName").value, standard: $("#nStd").value, mode: $("#nMode").value}); $("#nName").value = ""; await loadJobs(); openJob(j.id); });
+
+async function loadJobs(){
+  const r = await run(() => api("jobs")); if (!r) return;
+  $("#jobs").innerHTML = r.items.map(j => `<div class="job ${JOB && JOB.id === j.id ? "on" : ""}" data-id="${j.id}"><div class="t">${esc(j.name)}</div>
+    <div class="s">${esc((INFO.standards.find(s => s.id === j.standard) || {}).name || j.standard)} · ${j.mode === "new" ? "新增" : "替换"} · ${j.assets} 个资源 / ${j.slices} 张</div></div>`).join("") || `<div class="note" style="padding:0 12px">还没有任务</div>`;
+  $("#jobs").querySelectorAll(".job").forEach(e => e.onclick = () => openJob(e.dataset.id));
+}
+async function openJob(id){
+  const j = await run(() => api("job", {job: id})); if (!j) return;
+  JOB = j; render(); loadJobs(); poll();
+}
+function poll(){
+  clearTimeout(pollT);
+  if (JOB && JOB.ai && JOB.ai.state === "running") pollT = setTimeout(async () => { const j = await api("job", {job: JOB.id}).catch(() => null); if (j && JOB && j.id === JOB.id){ JOB = j; render(); } poll(); }, 2500);
+}
+
+// ---------- 动效预览(CSS 近似 Unity 里的曲线:同周期、同幅度、同相位) ----------
+let kfSeq = 0;
+function motionCss(m, scale){
+  const P = INFO.presets[m.preset]; if (!P) return {};
+  const amp = +(m.amp != null && m.amp !== "" ? m.amp : P.amp), p = +(m.period || P.period), d = (+(m.delay || 0)) % p, name = "k" + (++kfSeq);
+  let kf;
+  if (m.preset === "sway") kf = `0%,100%{transform:rotate(0)}25%{transform:rotate(${-amp}deg)}75%{transform:rotate(${amp}deg)}`;   // Unity z 轴逆时针为正,CSS 顺时针为正
+  else if (m.preset === "float") kf = `0%,50%,100%{transform:translateY(0)}25%{transform:translateY(${-amp * scale}px)}75%{transform:translateY(${amp * scale}px)}`;
+  else if (m.preset === "shake") kf = `0%,50%,100%{transform:translateX(0)}25%{transform:translateX(${amp * scale}px)}75%{transform:translateX(${-amp * scale}px)}`;
+  else if (m.preset === "breathe") kf = `0%,100%{transform:scale(1)}50%{transform:scale(${1 + amp})}`;
+  else if (m.preset === "blink") kf = `0%,100%{opacity:1}50%{opacity:${1 - amp}}`;
+  else if (m.preset === "tint") kf = `0%,100%{opacity:0}50%{opacity:${Math.min(1, amp)}}`;
+  const sin = ["sway", "float", "shake"].includes(m.preset);
+  const delay = -(sin ? (p - d) % p : (p - d) % p);
+  return {kf: `@keyframes ${name}{${kf}}`, anim: `${name} ${p}s ${sin ? "linear" : "ease-in-out"} ${delay}s infinite`, tint: m.preset === "tint" ? (m.color || P.color) : null};
+}
+
+const ROLE_HELP = "角色决定这张切图进主工程哪里:底框 / 预览图是单张图;上层 / 下层特效会合成特效 prefab,只有它们的动效会导出";
+function render(){
+  if (!JOB){ $("#view").innerHTML = `<div class="empty">左边选一个任务,或新建一个</div>`; return; }
+  const std = INFO.standards.find(s => s.id === JOB.standard) || {roles: {}};
+  const ai = JOB.ai || {}, ck = JOB.checked, built = JOB.built;
+  const styles = [];
+  let h = `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+    <input id="jName" value="${esc(JOB.name)}" style="font-size:16px;font-weight:700;width:300px">
+    <span class="chip">${esc(std.name)}</span>
+    <select id="jMode" ${std.replaceOnly ? "disabled" : ""}><option value="new" ${JOB.mode === "new" ? "selected" : ""}>新增</option><option value="replace" ${JOB.mode === "replace" ? "selected" : ""}>替换</option></select>
+    <span class="grow"></span><button id="jDel">删除任务</button></div>
+  <div class="note" style="margin-top:4px">${esc(std.note)}</div>
+  <div class="bar">
+    <button id="aInbox">从 Figma 收件</button>
+    <button id="aUpload">上传本地切图…</button>
+    <span style="width:10px"></span>
+    <button class="primary" id="aAi" ${ai.state === "running" ? "disabled" : ""}>${ai.state === "running" ? `AI 重绘中 ${ai.done + ai.failed}/${ai.total}…` : "AI 重绘(勾了 AI 的切图)"}</button>
+    <button id="aCheck">规则检查</button>
+    <button class="primary" id="aBuild">生成 unitypackage</button>
+    <button id="aPush">放回 Figma</button>
+  </div>
+  <div class="note">${ck ? `上次检查 ${esc(ck.time)}:<span style="color:${ck.error ? "var(--err)" : "var(--ok)"}">${ck.error} 个必须处理</span>、<span style="color:var(--warn)">${ck.warn} 个提示</span>` : "还没做规则检查"}
+    ${built ? ` · 上次生成 ${esc(built.time)}:${built.assets} 个文件 → <code>${esc(built.package)}</code>` : ""}
+    ${ai.state === "running" ? "" : ai.finished ? ` · AI 重绘 ${esc(ai.finished)} 完成:成功 ${ai.done}、失败 ${ai.failed}` : ""}</div>`;
+  if (!JOB.assets.length) h += `<div class="empty">还没有资源:在 Figma 里用插件「资源批处理」发送选中的资源,再点「从 Figma 收件」;或「上传本地切图」</div>`;
+  JOB.assets.forEach((a, ai_) => {
+    const sc = Math.min(1, 240 / Math.max(a.w, a.h, 1));
+    let stage = `<div class="stage" style="width:${a.w * sc}px;height:${a.h * sc}px" title="动效预览(浏览器里的近似效果,以 Unity 为准)">`;
+    a.slices.forEach(s => {
+      if (s.role === "skip" || s.role === "preview") return;   // 预览图是单独的一张(商店 / 列表里用),不叠在框上
+      const src = fileUrl(s.useNew !== false && s.new ? s.new : s.file);
+      const mc = s.motion && s.motion.preset ? motionCss(s.motion, sc) : {};
+      if (mc.kf) styles.push(mc.kf);
+      stage += `<div class="ly" style="left:${s.x * sc}px;top:${s.y * sc}px;width:${s.w * sc}px;height:${s.h * sc}px;${mc.anim && !mc.tint ? "animation:" + mc.anim : ""}">
+        <img src="${src}">${mc.tint ? `<div class="tintov" style="background:${esc(mc.tint)};-webkit-mask-image:url('${src}');mask-image:url('${src}');animation:${mc.anim}"></div>` : ""}</div>`;
+    });
+    stage += `</div>`;
+    h += `<div class="asset"><div class="ahead"><span class="n">${esc(a.name)}</span><span class="note">${a.w}×${a.h} · ${a.slices.length} 张切图</span>
+      ${JOB.mode === "new" && std.roles && INFO.standards.find(s => s.id === JOB.standard).roles ? `<span class="note">编号</span><input data-aid="${ai_}" value="${esc(a.id || "")}" style="width:80px">` : ""}
+      ${(a.issues || []).map(i => `<div class="iss ${i.level}" style="width:100%">${i.level === "error" ? "✗" : "!"} ${esc(i.text)}</div>`).join("")}</div>
+      <div class="abody">${stage}<div style="flex:1;min-width:0;overflow:auto"><table><tr><th>原图</th><th>新图</th><th>切图</th><th title="${esc(ROLE_HELP)}">角色 ⓘ</th><th>AI</th><th>用新图</th><th>动效</th>${JOB.mode === "replace" ? "<th>替换主工程里的</th>" : ""}</tr>`;
+    a.slices.forEach((s, si) => {
+      const m = s.motion || {}, P = m.preset ? INFO.presets[m.preset] : null;
+      const unit = {sway: "°", float: "px", shake: "px", breathe: "倍", blink: "", tint: ""}[m.preset] || "";
+      h += `<tr data-a="${ai_}" data-s="${si}">
+        <td><div class="thumb"><img src="${fileUrl(s.file)}"></div></td>
+        <td><div class="thumb">${s.new ? `<img src="${fileUrl(s.new)}">` : ""}</div></td>
+        <td><b>${esc(s.name)}</b><div class="note">${s.w}×${s.h} @ ${Math.round(s.x)},${Math.round(s.y)}</div><span class="st ${s.status}">${{todo: "未处理", queued: "排队中", running: "重绘中", done: "已重绘", failed: "重绘失败"}[s.status] || s.status}</span>
+          ${(s.issues || []).map(i => `<div class="iss ${i.level}">${i.level === "error" ? "✗" : "!"} ${esc(i.text)}</div>`).join("")}</td>
+        <td><select data-f="role">${Object.entries(std.roles).map(([k, v]) => `<option value="${k}" ${s.role === k ? "selected" : ""}>${esc(v)}</option>`).join("")}</select></td>
+        <td><input type="checkbox" data-f="ai" ${s.ai ? "checked" : ""}></td>
+        <td><input type="checkbox" data-f="useNew" ${s.useNew !== false ? "checked" : ""} ${s.new ? "" : "disabled"}></td>
+        <td><div class="mot"><select data-f="preset"><option value="">无</option>${Object.entries(INFO.presets).map(([k, v]) => `<option value="${k}" ${m.preset === k ? "selected" : ""}>${esc(v.label)}</option>`).join("")}</select>
+          ${P ? `<input type="number" step="any" data-f="amp" value="${m.amp != null ? m.amp : P.amp}" title="幅度">${unit}
+            <input type="number" step="0.1" min="0.1" data-f="period" value="${m.period || P.period}" title="周期(秒)">秒
+            <input type="number" step="0.05" data-f="delay" value="${m.delay || 0}" title="错开(秒):几层同时动时错开一点更自然">错开
+            ${m.preset === "tint" ? `<input type="color" data-f="color" value="${esc(m.color || P.color)}" title="变成的颜色">` : ""}` : ""}</div></td>
+        ${JOB.mode === "replace" ? `<td><input class="rp" data-f="replacePath" value="${esc(s.replacePath || "")}" placeholder="Assets/…/xxx.png"></td>` : ""}
+      </tr>`;
+    });
+    h += `</table></div></div></div>`;
+  });
+  if (ai.log && ai.log.length) h += `<details><summary class="note">AI 重绘日志</summary><pre class="note" style="white-space:pre-wrap">${esc(ai.log.join("\n"))}</pre></details>`;
+  $("#view").innerHTML = `<style>${styles.join("\n")}</style>` + h;
+  bind();
+}
+
+function slicePatch(tr, field, val){
+  const a = JOB.assets[+tr.dataset.a], s = a.slices[+tr.dataset.s];
+  let p = {};
+  if (["preset", "amp", "period", "delay", "color"].includes(field)){
+    if (field === "preset"){
+      const P = INFO.presets[val];
+      p.motion = val ? Object.assign({preset: val, amp: P.amp, period: P.period, delay: 0}, P.color ? {color: P.color} : {}) : null;
+    } else p.motion = Object.assign({}, s.motion, {[field]: field === "color" ? val : +val});
+  } else p[field] = val;
+  return {assets: {[a.name]: {slices: {[s.name]: p}}}};
+}
+let saveT = null;
+function bind(){
+  $("#jName").onchange = e => run(async () => { JOB = await api("update", {job: JOB.id, patch: {name: e.target.value}}); loadJobs(); });
+  $("#jMode").onchange = e => run(async () => { JOB = await api("update", {job: JOB.id, patch: {mode: e.target.value}}); render(); loadJobs(); });
+  $("#jDel").onclick = async () => { if (await ask(`删除任务「${JOB.name}」?原图、新图、交付包都会删掉,不能恢复。`, null, "删除")) run(async () => { await api("delete", {job: JOB.id}); JOB = null; render(); loadJobs(); }); };
+  $("#aInbox").onclick = () => run(async () => {
+    const r = await api("inbox");
+    if (!r.items.length) return show(`<b>中转箱是空的</b><p class="note" style="margin-top:8px">在桌面版 Figma 里:插件 → BUD UI Studio →「资源批处理」,填上右上角的配对码,选中资源点「发送」。<br>开发版插件第一次要从 Figma 菜单「插件 → 开发 → 从清单导入」选 figma-plugin/manifest.json。</p>`);
+    show(`<b>从 Figma 收件</b><p class="note">选一批收进当前任务(同名资源会被替换):</p>` + r.items.map(it => `<button class="pick" data-bid="${it.id}">${esc(it.time)} · ${esc(it.file || "")} / ${esc(it.page || "")}<br><span class="note">${it.assets.map(a => esc(a.name) + "(" + a.slices + " 张)").join("、")}</span></button>`).join(""));
+    document.querySelectorAll("[data-bid]").forEach(b => b.onclick = () => run(async () => { $("#dlg").close(); JOB = await api("import", {job: JOB.id, inbox: b.dataset.bid}); render(); loadJobs(); }, "已收进任务"));
+  });
+  $("#aUpload").onclick = () => { $("#files").value = ""; $("#files").click(); };
+  $("#aAi").onclick = () => run(async () => { const r = await api("ai", {job: JOB.id}); JOB = await api("job", {job: JOB.id}); render(); poll(); toast(`开始重绘 ${r.total} 张(本机 ComfyUI,每张约半分钟起)`); });
+  $("#aCheck").onclick = () => run(async () => { JOB = await api("check", {job: JOB.id}); render(); }, "检查完了");
+  $("#aBuild").onclick = () => run(async () => {
+    const r = await api("build", {job: JOB.id}); JOB = await api("job", {job: JOB.id}); render();
+    show(`<b style="color:var(--ok)">✓ 生成了交付包</b><p style="margin-top:8px">${r.assets} 个文件:<br><code>${esc(r.package)}</code></p>
+      <p class="note" style="margin-top:8px">在 Unity 里双击它导入(或 Assets → Import Package → Custom Package)。说明在同目录 README.md。</p>
+      ${r.configEntries.length ? `<p style="margin-top:8px">配置文件不会被改,要手动加这些条目(README 里也有):</p><pre class="note" style="white-space:pre-wrap">${esc(r.configEntries.map(e => JSON.stringify(e, null, 2)).join(",\n"))}</pre>` : ""}`);
+  });
+  $("#aPush").onclick = () => run(() => api("push", {job: JOB.id}), "已放进中转箱:到 Figma 插件「资源批处理」里点「取回处理结果」");
+  document.querySelectorAll("[data-aid]").forEach(i => i.onchange = () => run(async () => { const a = JOB.assets[+i.dataset.aid]; JOB = await api("update", {job: JOB.id, patch: {assets: {[a.name]: {id: i.value}}}}); render(); }));
+  document.querySelectorAll("tr[data-a] [data-f]").forEach(el => {
+    const ev = el.type === "number" || el.classList.contains("rp") ? "change" : el.type === "color" ? "change" : "change";
+    el.addEventListener(ev, () => {
+      const tr = el.closest("tr"), f = el.dataset.f, v = el.type === "checkbox" ? el.checked : el.value;
+      run(async () => { JOB = await api("update", {job: JOB.id, patch: slicePatch(tr, f, v)}); render(); });
+    });
+  });
+}
+$("#files").onchange = async e => {
+  const fs = [...e.target.files]; if (!fs.length) return;
+  const name = await ask("这批切图属于哪个资源?(头像框要带编号,如「头像框_40」)", fs.length === 1 ? fs[0].name.replace(/\.png$/i, "") : "");
+  if (!name) return;
+  const files = await Promise.all(fs.map(f => new Promise(res => { const r = new FileReader(); r.onload = () => res({name: f.name, b64: r.result.split(",")[1]}); r.readAsDataURL(f); })));
+  run(async () => { JOB = await api("upload", {job: JOB.id, name, files}); render(); loadJobs(); }, `已加入 ${files.length} 张`);
+};
+boot();
+</script>
+</body>
+</html>
