@@ -371,7 +371,7 @@ function renderTree(){
     if (n.isClose) tags.push("关闭"); else if (n.clickable || n.type==="button") tags.push("可点击");
     if ((n.clickable || n.type==="button") && n.clickAction && n.clickAction!=="event"){
       const tp = pageById(n.clickTargetPage);
-      tags.push(n.clickAction === "openPage" || n.clickAction === "openPopup" ? "→" + (tp ? tp.name.split("/")[0].replace(/^\d+\s*·\s*/, "").trim() : "未选") : {toggle:"切换显隐",show:"显示节点",hide:"隐藏节点",mask:"数字遮罩",closePanel:"关闭面板"}[n.clickAction]);
+      tags.push(n.clickAction === "openPage" || n.clickAction === "openPopup" ? "→" + (tp ? tp.name.split("/")[0].replace(/^\d+\s*·\s*/, "").trim() : "未选") : {toggle:"切换显隐",show:"显示节点",hide:"隐藏节点",swap:"切换到目标",mask:"数字遮罩",closePanel:"关闭面板"}[n.clickAction]);
     }
     if (n.hiddenByDefault) tags.push("初始隐藏");
     if (isKeepOld(n)) tags.push("沿用旧资源");
@@ -677,7 +677,7 @@ function playPreview(){ stage.classList.remove("previewing"); void stage.offsetW
 
 /* ================= 试玩模式:像真机一样点按钮、拖滚动区,日志显示程序会收到的回调 ================= */
 const CLICK_MOTIONS = {press:"按下缩放", bounce:"点击弹跳", shake:"点击抖动", flash:"点击闪烁", none:"无"};
-const CLICK_ACTIONS = {event:"仅触发事件", closePanel:"关闭整个面板", openPage:"打开页面", openPopup:"打开弹窗", toggle:"切换显示/隐藏", show:"显示节点", hide:"隐藏节点", mask:"切换数字遮罩(***)"};
+const CLICK_ACTIONS = {event:"仅触发事件", closePanel:"关闭整个面板", openPage:"打开页面", openPopup:"打开弹窗", toggle:"切换显示/隐藏", show:"显示节点", hide:"隐藏节点", swap:"切换到(显示目标、隐藏自己)", mask:"切换数字遮罩(***)"};
 let playing = false, elById = {};
 let playState = {hidden:{}, masked:{}, offset:{}};
 let playNav = {stack: [], popup: null}, playLayers = {base: null, popup: null};
@@ -767,6 +767,14 @@ function playClick(n, el){
       if (act === "openPage") playOpenPage(pg.id); else playOpenPopup(pg.id);
       return;
     }
+  }
+  if (target && act === "swap"){   // 显示目标 + 隐藏被点击的节点自己
+    playState.hidden[target.id] = false; playState.hidden[n.id] = true;
+    const tel = elById[target.id];
+    if (tel){ tel.style.display = "";
+      if (target.motion && target.motion !== "none"){ tel.style.animationDelay = "0s"; tel.classList.remove("m-" + target.motion); void tel.offsetWidth; tel.classList.add("m-" + target.motion); } }
+    if (el) el.style.display = "none";
+    note = ` · 切换到「${escHtml(target.name)}」(隐藏「${escHtml(n.name)}」)`;
   }
   if (target && (act === "toggle" || act === "show" || act === "hide")){
     const hide = act === "toggle" ? !playState.hidden[target.id] : act === "hide";
@@ -1024,15 +1032,15 @@ async function buildScreenFromFigma(frame, render, say, opts = {}){
       n.alpha = r4((fill && fill.opacity != null ? fill.opacity : 1) * (c.opacity != null ? c.opacity : 1));
       return n;
     }
-    if (item.kind === "variants"){   // 交互组件:外层容器 = 原实例;A = 当前状态(点击显示 B);B = 目标状态(默认隐藏,点击收起自己)。交互带 protoLink 标记,autoConfigure/resetAuto 不动
+    if (item.kind === "variants"){   // 交互组件:外层容器 = 原实例;A = 当前状态(点击切换到 B:显示 B、隐藏 A 自己);B = 目标状态(默认隐藏,点击切回 A)。交互带 protoLink 标记,autoConfigure/resetAuto 不动
       const n = addNode("container", parent, true); Object.assign(n, item.rect); n.figma = Object.assign({}, item.rect); n.name = c.name.slice(0, 32);
       const [a, b] = item.states.map(s => { const k = make(s.item, n); if (k) k.name = s.name.slice(0, 48); return k; });
       if (a && b){
         const used = new Set(); walkAll(x => { if (x.key) used.add(x.key); });
         const uniqKey = k0 => { let k = k0, i = 2; while (used.has(k)) k = k0 + (i++); used.add(k); return k; };
         const base = camelKey(c.name) || "state";
-        a.clickable = true; a.protoLink = true; a.key = uniqKey(base + "Swap"); a.clickAction = "show"; a.clickTarget = b.id;
-        b.hiddenByDefault = true; b.clickable = true; b.protoLink = true; b.key = uniqKey(base + "Restore"); b.clickAction = "hide"; b.clickTarget = b.id;
+        a.clickable = true; a.protoLink = true; a.key = uniqKey(base + "Swap"); a.clickAction = "swap"; a.clickTarget = b.id;
+        b.hiddenByDefault = true; b.clickable = true; b.protoLink = true; b.key = uniqKey(base + "Restore"); b.clickAction = "swap"; b.clickTarget = a.id;
       }
       return n;
     }
@@ -1905,6 +1913,7 @@ function clickActionOf(b){
   const t = b.clickTarget ? findNodeAll(b.clickTarget) : null;
   if (a === "event" || !t) return {act: "event", target: null};
   if (a === "mask" && t.type !== "text") return {act: "event", target: null};
+  if (a === "swap" && t.id === b.id) return {act: "event", target: null};
   return {act: a, target: t};
 }
 function canvasGroupBlock(fid, goFid){ return `--- !u!225 &${fid}\nCanvasGroup:\n  m_ObjectHideFlags: 0\n  m_CorrespondingSourceObject: {fileID: 0}\n  m_PrefabInstance: {fileID: 0}\n  m_PrefabAsset: {fileID: 0}\n  m_GameObject: {fileID: ${goFid}}\n  m_Enabled: 1\n  m_Alpha: 1\n  m_Interactable: 1\n  m_BlocksRaycasts: 1\n  m_IgnoreParentGroups: 0\n`; }
@@ -2338,7 +2347,7 @@ function genPrefab(mod, usedAssets, guids, buttons, dynTexts, ids = {}){
     const {act, target} = clickActionOf(b);
     let s = `  ${b.key}Button: {fileID: ${fieldRefs.buttons[b.key]}}`;
     if (act === "mask") s += `\n  ${b.key}MaskText: {fileID: ${nodeFids[target.id].text}}`;
-    else if (act === "toggle" || act === "show" || act === "hide") s += `\n  ${b.key}Target: {fileID: ${nodeFids[target.id].go}}`;
+    else if (act === "toggle" || act === "show" || act === "hide" || act === "swap") s += `\n  ${b.key}Target: {fileID: ${nodeFids[target.id].go}}`;
     return s;
   }).join("\n");
   const txtFields = dynTexts.map(t=>`  ${t.key}Text: {fileID: ${fieldRefs.texts[t.key]}}`).join("\n");
@@ -2475,7 +2484,7 @@ function genViewCs(mod, buttons, dynTexts){
     const {act, target} = clickActionOf(b);
     let s = `        [SerializeField] private Button ${b.key}Button;   // ${b.name}`;
     if (act === "mask") s += `\n        [SerializeField] private Text ${b.key}MaskText;   // 点击切换 *** 遮罩:${target.name}`;
-    else if (act === "toggle" || act === "show" || act === "hide") s += `\n        [SerializeField] private GameObject ${b.key}Target;   // 点击${CLICK_ACTIONS[act]}:${target.name}`;
+    else if (act === "toggle" || act === "show" || act === "hide" || act === "swap") s += `\n        [SerializeField] private GameObject ${b.key}Target;   // 点击${CLICK_ACTIONS[act]}:${target.name}`;
     return s;
   }).join("\n");
   const txtFields = dynTexts.map(t=>`        [SerializeField] private Text ${t.key}Text;      // ${t.name}`).join("\n");
@@ -2484,6 +2493,7 @@ function genViewCs(mod, buttons, dynTexts){
     const pre = act === "toggle" ? `if (${b.key}Target != null) ${b.key}Target.SetActive(!${b.key}Target.activeSelf); `
       : act === "show" ? `if (${b.key}Target != null) ${b.key}Target.SetActive(true); `
       : act === "hide" ? `if (${b.key}Target != null) ${b.key}Target.SetActive(false); `
+      : act === "swap" ? `if (${b.key}Target != null) { ${b.key}Target.SetActive(true); ${b.key}Button.gameObject.SetActive(false); } `
       : act === "mask" ? `ToggleMask(${b.key}MaskText); `
       : act === "openPage" ? `OpenPage(${pageIndex}); `
       : act === "openPopup" ? `OpenPopup(${pageIndex}); ` : "";

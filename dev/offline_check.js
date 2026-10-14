@@ -112,6 +112,33 @@ function check() {
     else navOk.push(n.key);
   });
   ok(!navBad.length, `跳转按钮接线正确(${navOk.length} 个)` + (navBad.length ? ";" + navBad.join("、") : ""));
+  // 「切换到」(swap):View 里有对应接线;目标 GameObject 字段、按钮字段(= 自己所在的 GameObject)都能在 prefab 里按 fileID 解析。
+  // 工程里没有 swap 节点时,临时把第一个可点击节点接到另一个节点上验证一次,验完还原
+  {
+    const hasSwap = () => { let f = false; walkAll(n => { if ((n.clickable || n.type === "button") && n.clickAction === "swap") f = true; }); return f; };
+    let tmp = null;
+    if (!hasSwap()) {
+      let a = null, b = null; walkAll(n => { if (!a && (n.clickable || n.type === "button")) a = n; });
+      if (a) walkAll(n => { if (!b && n.id !== a.id) b = n; });
+      if (a && b) { tmp = { a, save: { clickAction: a.clickAction, clickTarget: a.clickTarget } }; a.clickAction = "swap"; a.clickTarget = b.id; }
+    }
+    const btns2 = [], dyn2 = []; walkAll(n => { if (n.type === "button" || n.clickable) btns2.push(n); if (n.type === "text" && n.dynamic) dyn2.push(n); });
+    const y2 = tmp ? buildDelivery(mod).prefabYaml : y, view2 = tmp ? genViewCs(mod, btns2, dyn2) : cs.View;
+    const goIds = new Set([...y2.matchAll(/^--- !u!1 &(\d+)$/gm)].map(m => m[1]));
+    const monoGo = new Map([...y2.matchAll(/^--- !u!114 &(\d+)\nMonoBehaviour:\n(?:.*\n)*?  m_GameObject: \{fileID: (\d+)\}/gm)].map(m => [m[1], m[2]]));
+    const good = [], bad = [];
+    btns2.forEach(n => {
+      if (n.clickAction !== "swap" || !n.clickTarget || !findNodeAll(n.clickTarget) || n.clickTarget === n.id) return;
+      const tf = (y2.match(new RegExp(`\\n  ${n.key}Target: \\{fileID: (\\d+)\\}`)) || [])[1], bf = (y2.match(new RegExp(`\\n  ${n.key}Button: \\{fileID: (\\d+)\\}`)) || [])[1];
+      const line = view2.split("\n").find(l => l.includes(`${n.key}Button.onClick.AddListener`)) || "";
+      if (!tf || !goIds.has(tf)) bad.push(`${n.key}:目标 GameObject 字段没接上或解析不到`);
+      else if (!bf || !goIds.has(monoGo.get(bf))) bad.push(`${n.key}:按钮自身的 GameObject 解析不到`);
+      else if (!view2.includes(`private GameObject ${n.key}Target;`) || !line.includes(`${n.key}Target.SetActive(true)`) || !line.includes(`${n.key}Button.gameObject.SetActive(false)`) || !line.includes(`onAction.Invoke("${n.key}")`)) bad.push(`${n.key}:View 里的 swap 接线不完整`);
+      else good.push(n.key);
+    });
+    if (tmp) Object.assign(tmp.a, tmp.save), tmp.save.clickAction === undefined && delete tmp.a.clickAction, tmp.save.clickTarget === undefined && delete tmp.a.clickTarget;
+    ok(!bad.length && (good.length > 0 || !tmp), `「切换到」接线正确(${good.length} 个${tmp ? ",临时接线验证" : ""})` + (bad.length ? ";" + bad.join("、") : ""));
+  }
   const balanced = s => { let a = 0; for (const c of s) { a += c === "{" ? 1 : c === "}" ? -1 : 0; if (a < 0) return false; } return a === 0; };
   Object.entries(cs).forEach(([k, s]) => ok(balanced(s), `${mod}${k}.cs 大括号配对`));
   const keys = new Set(), bad = [], dup = [];
