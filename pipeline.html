@@ -30,6 +30,27 @@
   .job:hover{background:var(--panel2)} .job.on{background:var(--panel2);border-left-color:var(--acc)}
   .job .t{font-weight:600} .job .s{color:var(--dim);font-size:12px}
   .newjob{padding:10px 12px;border-top:1px solid var(--line);display:grid;gap:6px}
+  .navc{margin:10px 10px 4px;text-align:left;font-weight:700}
+  .navc.on{background:var(--acc);border-color:var(--acc);color:#fff}
+  .grp{display:flex;align-items:center;gap:6px;padding:8px 12px 4px;color:var(--dim);font-size:12px;font-weight:700;cursor:pointer;user-select:none}
+  .grp .cnt{font-weight:400} .grp .add{margin-left:auto;padding:0 7px;font-size:13px;line-height:18px}
+  .grp .arr{display:inline-block;width:10px;transition:transform .15s} .grp.closed .arr{transform:rotate(-90deg)}
+  .job.done .t{color:var(--dim)} .job.done .t::before{content:"✓ ";color:var(--ok)}
+  .cbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+  .seg{display:flex;gap:2px} .seg button{border-color:transparent;background:none;color:var(--dim)} .seg button.on{background:var(--panel2);border-color:var(--line);color:var(--ink)}
+  .csec{margin:6px 0 18px} .csec h3{font-size:14px;margin:0 0 8px;display:flex;align-items:baseline;gap:8px} .csec h3 .note{font-weight:400}
+  .cgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
+  .ccard{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden;display:flex;flex-direction:column}
+  .ccard .cth{height:120px;background:repeating-conic-gradient(#2b2b35 0 25%,#23232c 0 50%) 0 0/14px 14px;display:flex;align-items:center;justify-content:center;position:relative;cursor:pointer;color:var(--dim);font-size:12px}
+  .ccard .cth img{max-width:100%;max-height:100%;object-fit:contain}
+  .ccard .cbadge{position:absolute;left:8px;top:8px;font-size:11px;border-radius:99px;padding:1px 8px;background:#000a;color:#fff}
+  .ccard .cbadge.done{background:var(--ok);color:#000} .ccard .cbadge.del{background:var(--err)}
+  .ccard .cb{padding:8px 10px;display:grid;gap:2px;flex:1} .ccard .cn{font-weight:700;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ccard .cops{display:flex;flex-wrap:wrap;gap:4px;padding:0 10px 10px} .ccard .cops button{padding:3px 8px;font-size:12px}
+  .ccard .cops .del{color:var(--err)}
+  .cnew{border:1.5px dashed var(--line);border-radius:10px;min-height:120px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;color:var(--dim);cursor:pointer;background:none}
+  .cnew:hover{border-color:var(--acc);color:var(--ink)} .cnew b{font-size:22px;font-weight:300;color:var(--acc)}
+  .crumb{display:flex;align-items:center;gap:6px;color:var(--dim);font-size:12px;margin-bottom:6px} .crumb a{color:var(--acc);cursor:pointer}
   #view{flex:1;overflow:auto;padding:14px 18px 40px}
   .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0 12px}
   .note{color:var(--dim);font-size:12px}
@@ -71,26 +92,22 @@
 </header>
 <main>
   <aside>
-    <h4>批处理任务</h4>
+    <button class="navc" id="centerBtn" title="全部批处理任务:按类型归类,管理 / 编辑 / 复制 / 导出 / 删除">▦ 任务中心</button>
     <div id="jobs"></div>
-    <div class="newjob">
-      <b>＋ 新建任务</b>
-      <input id="nName" placeholder="任务名(如:S10 头像框一批)">
-      <select id="nStd"></select>
-      <select id="nMode"><option value="new">新增(新编号的资源)</option><option value="replace">替换(原地换掉已有的图)</option></select>
-      <button class="primary" id="nGo">新建</button>
-    </div>
+    <div class="newjob"><button class="primary" id="nGo">＋ 新建任务</button></div>
   </aside>
-  <section id="view"><div class="empty">左边选一个任务,或新建一个</div></section>
+  <section id="view"><div class="empty">加载中…</div></section>
 </main>
 <div id="toast"></div>
 <dialog id="dlg"><div id="dlgBody"></div><div style="text-align:right;margin-top:12px"><button onclick="dlg.close()">关闭</button></div></dialog>
 <input type="file" id="files" multiple accept=".png" hidden>
+<input type="file" id="zipIn" accept=".zip" hidden>
 <script>
 const STUDIO_PORT = 8791;
 const $ = s => document.querySelector(s);
 const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
-let SVC = null, INFO = null, JOB = null, pollT = null;
+let SVC = null, INFO = null, JOB = null, pollT = null, JOBS = [];
+let CF = {status: "doing", type: "all", kw: ""};   // 任务中心的筛选
 const toast = (t, ms) => { const e = $("#toast"); e.textContent = t; e.style.display = "block"; clearTimeout(e._t); e._t = setTimeout(() => e.style.display = "none", ms || 3500); };
 const show = html => { $("#dlgBody").innerHTML = html; $("#dlg").showModal(); };
 // 页面内的输入 / 确认框(内置浏览器面板会吞掉原生 prompt / confirm)
@@ -144,20 +161,164 @@ async function boot(){
   $("#key").textContent = INFO.key;
   $("#unityRoot").value = INFO.settings.unityRoot || "";
   tellParent();
-  $("#nStd").innerHTML = INFO.standards.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join("");
   await loadJobs();
+  if (!JOB) render();
   const want = new URLSearchParams(location.search).get("job");   // 刷新前打开的任务
   if (want && !JOB){ const r = await api("jobs").catch(() => null); if (r && r.items.some(j => j.id === want)) await openJob(want); }
 }
 $("#keyChip").onclick = () => navigator.clipboard.writeText(INFO.key).then(() => toast("配对码已复制,填进 Figma 插件「资源批处理」"));
 $("#saveRoot").onclick = () => run(async () => { await api("settings", {settings: {unityRoot: $("#unityRoot").value}}); if (INFO){ INFO.settings.unityRoot = $("#unityRoot").value; tellParent(); } }, "主工程路径已保存");
-$("#nGo").onclick = () => run(async () => { const j = await api("create", {name: $("#nName").value, standard: $("#nStd").value, mode: $("#nMode").value}); $("#nName").value = ""; await loadJobs(); openJob(j.id); });
+$("#nGo").onclick = () => newJobDialog();
+$("#centerBtn").onclick = () => goCenter();
 
+// ---------- 任务中心:按类型归类,管理 / 编辑 / 复制 / 导出 / 删除(先进回收站) ----------
+const stdOf = id => (INFO.standards.find(s => s.id === id) || {id, name: id});
+const jobUrl = (id, rel, t) => `${SVC ? SVC.base : ""}/exports/pipeline/${id}/${encodeURI(rel)}${t ? "?t=" + encodeURIComponent(t) : ""}`;
+const lsGet = k => { try { return localStorage.getItem(k) || ""; } catch (e) { return ""; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
 async function loadJobs(){
   const r = await run(() => api("jobs")); if (!r) return;
-  $("#jobs").innerHTML = r.items.map(j => `<div class="job ${JOB && JOB.id === j.id ? "on" : ""}" data-id="${j.id}"><div class="t">${esc(j.name)}</div>
-    <div class="s">${esc((INFO.standards.find(s => s.id === j.standard) || {}).name || j.standard)} · ${j.mode === "new" ? "新增" : "替换"} · ${j.assets} 个资源 / ${j.slices} 张</div></div>`).join("") || `<div class="note" style="padding:0 12px">还没有任务</div>`;
+  JOBS = r.items;
+  const closed = lsGet("budui_pipe_closed").split(",");
+  $("#centerBtn").classList.toggle("on", !JOB);
+  $("#jobs").innerHTML = INFO.standards.map(st => {
+    const js = JOBS.filter(j => j.standard === st.id && !j.deleted);
+    const shut = closed.includes(st.id);
+    return `<div class="grp ${shut ? "closed" : ""}" data-grp="${esc(st.id)}"><span class="arr">▾</span>${esc(st.name)}<span class="cnt">${js.length}</span>
+        <button class="add" data-add="${esc(st.id)}" title="新建「${esc(st.name)}」任务">＋</button></div>`
+      + (shut ? "" : js.map(j => `<div class="job ${JOB && JOB.id === j.id ? "on" : ""} ${j.status === "done" ? "done" : ""}" data-id="${j.id}"><div class="t">${esc(j.name)}</div>
+          <div class="s">${j.mode === "new" ? "新增" : "替换"} · ${j.assets} 个资源 / ${j.slices} 张</div></div>`).join("")
+        || `<div class="note" style="padding:0 12px 4px 28px">还没有任务</div>`);
+  }).join("");
   $("#jobs").querySelectorAll(".job").forEach(e => e.onclick = () => openJob(e.dataset.id));
+  $("#jobs").querySelectorAll("[data-grp]").forEach(e => e.onclick = ev => {
+    if (ev.target.dataset.add) return newJobDialog(ev.target.dataset.add);
+    const c = lsGet("budui_pipe_closed").split(",").filter(Boolean), id = e.dataset.grp;
+    lsSet("budui_pipe_closed", (c.includes(id) ? c.filter(x => x !== id) : c.concat(id)).join(",")); loadJobs();
+  });
+  if (!JOB && $("#view").dataset.mode === "center") renderCenter();
+}
+function goCenter(type){
+  JOB = null; clearTimeout(pollT);
+  if (type) CF.type = type;
+  render(); loadJobs(); rememberJob();
+}
+function newJobDialog(std){
+  show(`<b>新建批处理任务</b>
+    <div style="display:grid;gap:8px;margin-top:10px">
+      <label class="note">类型<select id="njStd" style="width:100%;margin-top:2px">${INFO.standards.map(s => `<option value="${esc(s.id)}" ${s.id === (std || (CF.type !== "all" ? CF.type : "")) ? "selected" : ""}>${esc(s.name)}</option>`).join("")}</select></label>
+      <label class="note">任务名<input id="njName" style="width:100%;margin-top:2px" placeholder="如:S10 头像框一批"></label>
+      <label class="note">模式<select id="njMode" style="width:100%;margin-top:2px"><option value="new">新增(新编号的资源)</option><option value="replace">替换(原地换掉主工程里已有的图)</option></select></label>
+      <label class="note">备注(可选)<input id="njNote" style="width:100%;margin-top:2px"></label>
+      <button class="primary" id="njGo">新建</button></div>`);
+  $("#njName").focus();
+  $("#njGo").onclick = () => run(async () => {
+    const j = await api("create", {name: $("#njName").value.trim(), standard: $("#njStd").value, mode: $("#njMode").value, note: $("#njNote").value.trim()});
+    $("#dlg").close(); await loadJobs(); openJob(j.id);
+  });
+}
+function editJobDialog(id){
+  const j = JOBS.find(x => x.id === id) || JOB; if (!j) return;
+  show(`<b>编辑任务信息</b><div style="display:grid;gap:8px;margin-top:10px">
+      <label class="note">任务名<input id="ejName" value="${esc(j.name)}" style="width:100%;margin-top:2px"></label>
+      <label class="note">备注<input id="ejNote" value="${esc(j.note || "")}" style="width:100%;margin-top:2px" placeholder="这批资源的说明、负责人、进度……"></label>
+      <div class="note">类型:${esc(stdOf(j.standard).name)}(类型建好后不能改,要换类型就新建任务)</div>
+      <button class="primary" id="ejGo">保存</button></div>`);
+  $("#ejGo").onclick = () => run(async () => {
+    const r = await api("update", {job: id, patch: {name: $("#ejName").value.trim() || j.name, note: $("#ejNote").value}});
+    $("#dlg").close(); if (JOB && JOB.id === id){ JOB = r; render(); } await loadJobs();
+  }, "已保存");
+}
+async function jobOp(op, id){
+  const j = JOBS.find(x => x.id === id) || JOB;
+  if (op === "open") return openJob(id);
+  if (op === "edit") return editJobDialog(id);
+  if (op === "dup") return run(async () => { const n = await api("duplicate", {job: id}); await loadJobs(); toast(`已复制成「${n.name}」`); });
+  if (op === "done" || op === "undone") return run(async () => { const r = await api("update", {job: id, patch: {status: op === "done" ? "done" : "doing"}}); if (JOB && JOB.id === id){ JOB = r; render(); } await loadJobs(); });
+  if (op === "trash") return run(async () => { await api("trash", {job: id}); if (JOB && JOB.id === id) goCenter(); else await loadJobs(); toast("已移到回收站(任务中心 → 回收站 可以恢复)"); });
+  if (op === "restore") return run(async () => { await api("restore", {job: id}); await loadJobs(); toast("已恢复"); });
+  if (op === "purge"){
+    if (await ask(`彻底删除「${j ? j.name : id}」?原图、AI 新图、交付包都会删掉,不能恢复。`, null, "彻底删除")) run(async () => { await api("delete", {job: id}); await loadJobs(); });
+    return;
+  }
+  if (op === "export") return exportDialog(id);
+}
+function exportDialog(id){
+  const j = JOBS.find(x => x.id === id) || JOB, b = j && j.built;
+  show(`<b>导出「${esc(j.name)}」</b>
+    <div style="display:grid;gap:10px;margin-top:10px">
+      <div><button class="primary" id="exZip">导出任务包(.zip)</button>
+        <div class="note" style="margin-top:4px">原图、AI 新图、动效、配置字段、交付包都在里面;发给同事,对方在任务中心「导入任务」就能接着做。</div></div>
+      <div>${b ? `<a href="${jobUrl(id, "build/" + b.file)}" download="${esc(b.file)}"><button>下载交付包 ${esc(b.file)}</button></a> <button id="exReveal">打开所在文件夹</button>
+        <div class="note" style="margin-top:4px">上次生成 ${esc(b.time)};内容改过的话先打开任务「生成 unitypackage」再导出。</div>`
+        : `<div class="note">还没生成交付包:打开任务 →「规则检查」→「生成 unitypackage」。</div>`}</div></div>`);
+  $("#exZip").onclick = () => exportZip([id]);
+  if (b) $("#exReveal").onclick = () => run(() => api("reveal", {job: id, what: "build"}));
+}
+function exportZip(ids){
+  return run(async () => {
+    const r = await api("export", {jobs: ids});
+    show(`<b style="color:var(--ok)">✓ 已导出 ${r.jobs} 个任务</b><p class="note" style="margin-top:8px">${esc(r.path)}</p>
+      <div style="margin-top:10px;display:flex;gap:8px"><a href="${SVC ? SVC.base : ""}/${encodeURI(r.url)}" download="${esc(r.file)}"><button class="primary">下载</button></a><button id="exOpen">打开所在文件夹</button></div>`);
+    $("#exOpen").onclick = () => run(() => api("reveal", {what: "exports"}));
+  });
+}
+$("#zipIn").onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  const b64 = await new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result.split(",")[1]); r.readAsDataURL(f); });
+  run(async () => { const r = await api("importJobs", {zip: b64}); await loadJobs(); toast(`已导入 ${r.jobs.length} 个任务:${r.jobs.map(x => x.name).join("、")}`, 6000); });
+};
+function renderCenter(){
+  $("#view").dataset.mode = "center";
+  const live = JOBS.filter(j => !j.deleted), kw = CF.kw.trim().toLowerCase();
+  const groups = {doing: live.filter(j => j.status !== "done"), done: live.filter(j => j.status === "done"), all: live, trash: JOBS.filter(j => j.deleted)};
+  let list = groups[CF.status] || live;
+  const typeCount = id => list.filter(j => j.standard === id).length;
+  if (kw) list = list.filter(j => [j.name, j.note, stdOf(j.standard).name, ...(j.ids || [])].some(x => String(x || "").toLowerCase().includes(kw)));
+  const trash = CF.status === "trash";
+  const card = j => {
+    const done = j.status === "done";
+    const ops = trash
+      ? `<button data-op="restore">恢复</button><button class="del" data-op="purge">彻底删除</button>`
+      : `<button class="primary" data-op="open">打开</button><button data-op="edit" title="改任务名、备注">编辑信息</button><button data-op="dup" title="复制一份(含原图、新图、动效),在副本上做另一个版本">复制</button>`
+        + `<button data-op="export" title="导出任务包(发给同事)/ 下载交付包">导出</button><button data-op="${done ? "undone" : "done"}">${done ? "移回进行中" : "标记完成"}</button><button class="del" data-op="trash">删除</button>`;
+    const ck = j.checked;
+    return `<div class="ccard" data-id="${j.id}">
+      <div class="cth" ${trash ? "" : 'data-op="open"'}>${j.thumb ? `<img src="${jobUrl(j.id, j.thumb, j.updated)}" alt="">` : "还没有素材"}
+        <span class="cbadge ${trash ? "del" : done ? "done" : ""}">${trash ? "已删除" : done ? "已完成" : "进行中"}</span></div>
+      <div class="cb"><div class="cn" ${trash ? "" : 'data-op="open"'} title="${esc(j.name)}">${esc(j.name)}</div>
+        <div class="note">${j.mode === "new" ? "新增" : "替换"} · ${j.assets} 个资源 / ${j.slices} 张切图${(j.ids || []).length ? " · 编号 " + esc(j.ids.slice(0, 4).join("、")) + (j.ids.length > 4 ? "…" : "") : ""}</div>
+        <div class="note">更新于 ${esc(j.updated || "—")}${trash ? " · 删除于 " + esc(j.deleted) : ""}</div>
+        <div class="note">${j.built ? `已生成交付包 ${esc(j.built.time)}` : "还没生成交付包"}${ck ? ` · 检查 <span style="color:${ck.error ? "var(--err)" : "var(--ok)"}">${ck.error} 红</span> / <span style="color:var(--warn)">${ck.warn} 黄</span>` : ""}</div>
+        ${j.note ? `<div class="note" style="color:var(--ink)" title="${esc(j.note)}">📝 ${esc(j.note)}</div>` : ""}</div>
+      <div class="cops">${ops}</div></div>`;
+  };
+  const types = INFO.standards.filter(st => CF.type === "all" || st.id === CF.type);
+  let h = `<div class="cbar"><b style="font-size:16px">任务中心</b>
+      <div class="seg">${[["doing", "进行中"], ["done", "已完成"], ["all", "全部"], ["trash", "回收站"]].map(([k, l]) => `<button data-cf="${k}" class="${CF.status === k ? "on" : ""}">${l} ${groups[k].length}</button>`).join("")}</div>
+      <span class="grow"></span>
+      <input id="cfKw" placeholder="搜索任务名 / 备注 / 编号" value="${esc(CF.kw)}" style="width:200px">
+      <button id="cfImport" title="导入同事发来的任务包(.zip)">导入任务</button>
+      <button id="cfExportAll" title="把全部任务(不含回收站)打成一个任务包:备份或搬到另一台电脑">导出全部</button>
+      <button class="primary" id="cfNew">＋ 新建任务</button></div>
+    <div class="cbar"><div class="seg"><button data-ct="all" class="${CF.type === "all" ? "on" : ""}">全部类型 ${list.length}</button>${INFO.standards.map(st => `<button data-ct="${esc(st.id)}" class="${CF.type === st.id ? "on" : ""}">${esc(st.name)} ${typeCount(st.id)}</button>`).join("")}</div></div>`;
+  for (const st of types){
+    const js = list.filter(j => j.standard === st.id);
+    if (!js.length && (trash || kw || CF.status === "done")) continue;
+    h += `<div class="csec"><h3>${esc(st.name)}<span class="note">${js.length} 个任务</span></h3><div class="cgrid">`
+      + (trash || kw ? "" : `<button class="cnew" data-new="${esc(st.id)}"><b>＋</b><span>新建「${esc(st.name)}」任务</span></button>`)
+      + js.map(card).join("") + `</div></div>`;
+  }
+  if (!list.length && (trash || kw || CF.status === "done")) h += `<div class="empty">${trash ? "回收站是空的" : kw ? "没有匹配的任务" : "还没有标记完成的任务"}</div>`;
+  $("#view").innerHTML = h;
+  $("#view").querySelectorAll("[data-cf]").forEach(b => b.onclick = () => { CF.status = b.dataset.cf; renderCenter(); });
+  $("#view").querySelectorAll("[data-ct]").forEach(b => b.onclick = () => { CF.type = b.dataset.ct; renderCenter(); });
+  $("#view").querySelectorAll("[data-new]").forEach(b => b.onclick = () => newJobDialog(b.dataset.new));
+  $("#view").querySelectorAll(".ccard [data-op]").forEach(b => b.onclick = () => jobOp(b.dataset.op, b.closest(".ccard").dataset.id));
+  $("#cfKw").oninput = e => { CF.kw = e.target.value; const pos = e.target.selectionStart; renderCenter(); const i = $("#cfKw"); i.focus(); i.setSelectionRange(pos, pos); };
+  $("#cfImport").onclick = () => { $("#zipIn").value = ""; $("#zipIn").click(); };
+  $("#cfExportAll").onclick = () => exportZip([]);
+  $("#cfNew").onclick = () => newJobDialog();
 }
 async function openJob(id){
   const j = await run(() => api("job", {job: id})); if (!j) return;
@@ -188,15 +349,19 @@ function motionCss(m, scale){
 const ROLE_HELP = "角色决定这张切图进主工程哪里:底框 / 预览图是单张图;上层 / 下层特效会合成特效 prefab,只有它们的动效会导出";
 const roleInfo = (std, r) => (std.roleInfo || {})[r] || {stage: true, motion: true};
 function render(){
-  if (!JOB){ $("#view").innerHTML = `<div class="empty">左边选一个任务,或新建一个</div>`; return; }
+  if (!JOB) return renderCenter();
+  $("#view").dataset.mode = "job";
   const std = INFO.standards.find(s => s.id === JOB.standard) || {roles: {}};
   const ai = JOB.ai || {}, ck = JOB.checked, built = JOB.built;
   const styles = [];
-  let h = `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+  let h = `<div class="crumb"><a id="jBack">‹ 任务中心</a> / <a id="jType">${esc(std.name)}</a> / <span>${esc(JOB.name)}</span>${JOB.status === "done" ? ' · <span style="color:var(--ok)">已完成</span>' : ""}</div>
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
     <input id="jName" value="${esc(JOB.name)}" style="font-size:16px;font-weight:700;width:300px">
     <span class="chip">${esc(std.name)}</span>
     <select id="jMode" ${std.replaceOnly ? "disabled" : ""}><option value="new" ${JOB.mode === "new" ? "selected" : ""}>新增</option><option value="replace" ${JOB.mode === "replace" ? "selected" : ""}>替换</option></select>
-    <span class="grow"></span><button id="jDel">删除任务</button></div>
+    <span class="grow"></span><button id="jEdit" title="改任务名、备注">编辑信息</button><button id="jDup" title="复制一份">复制</button>
+    <button id="jExport" title="导出任务包 / 下载交付包">导出</button><button id="jDone">${JOB.status === "done" ? "移回进行中" : "标记完成"}</button><button id="jDel" style="color:var(--err)">删除</button></div>
+  ${JOB.note ? `<div class="note" style="margin-top:4px;color:var(--ink)">📝 ${esc(JOB.note)}</div>` : ""}
   <div class="note" style="margin-top:4px">${esc(std.note)}</div>
   <div class="bar">
     <button id="aInbox">从 Figma 收件</button>
@@ -284,7 +449,13 @@ let saveT = null;
 function bind(){
   $("#jName").onchange = e => run(async () => { JOB = await api("update", {job: JOB.id, patch: {name: e.target.value}}); loadJobs(); });
   $("#jMode").onchange = e => run(async () => { JOB = await api("update", {job: JOB.id, patch: {mode: e.target.value}}); render(); loadJobs(); });
-  $("#jDel").onclick = async () => { if (await ask(`删除任务「${JOB.name}」?原图、新图、交付包都会删掉,不能恢复。`, null, "删除")) run(async () => { await api("delete", {job: JOB.id}); JOB = null; render(); loadJobs(); rememberJob(); }); };
+  $("#jDel").onclick = () => jobOp("trash", JOB.id);
+  $("#jEdit").onclick = () => jobOp("edit", JOB.id);
+  $("#jDup").onclick = () => jobOp("dup", JOB.id);
+  $("#jExport").onclick = () => jobOp("export", JOB.id);
+  $("#jDone").onclick = () => jobOp(JOB.status === "done" ? "undone" : "done", JOB.id);
+  $("#jBack").onclick = () => goCenter();
+  $("#jType").onclick = () => goCenter(JOB.standard);
   $("#aInbox").onclick = () => run(async () => {
     const r = await api("inbox");
     if (!r.items.length) return show(`<b>中转箱是空的</b><p class="note" style="margin-top:8px">在桌面版 Figma 里:插件 → BUD UI Studio →「资源批处理」,填上右上角的配对码,选中资源点「发送」。<br>开发版插件第一次要从 Figma 菜单「插件 → 开发 → 从清单导入」选 figma-plugin/manifest.json。</p>`);

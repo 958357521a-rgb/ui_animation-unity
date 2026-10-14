@@ -550,8 +550,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 "settings": lambda: pc.settings(q.get("settings") or {}),
                 "jobs": lambda: {"items": pc.list_jobs()},
                 "job": lambda: pc.load(jid),
-                "create": lambda: pc.create_job(q.get("name"), q.get("standard"), q.get("mode", "new")),
-                "delete": lambda: pc.delete_job(jid),
+                "create": lambda: pc.create_job(q.get("name"), q.get("standard"), q.get("mode", "new"), q.get("note", "")),
+                "delete": lambda: pc.delete_job(jid),              # 彻底删除
+                "trash": lambda: pc.trash_job(jid),                # 删除 = 进回收站
+                "restore": lambda: pc.trash_job(jid, restore=True),
+                "duplicate": lambda: pc.duplicate_job(jid),
+                "export": lambda: pc.export_jobs(q.get("jobs") or []),   # 任务包 .zip(空 = 全部)
+                "importJobs": lambda: pc.import_jobs(q.get("zip") or ""),
+                "reveal": lambda: pc.reveal(jid, q.get("what", "build")),
                 "inbox": lambda: {"items": pc.bridge_inbox_list()},
                 "import": lambda: pc.import_inbox(jid, q.get("inbox")),
                 "upload": lambda: pc.add_upload(jid, q.get("name"), q.get("files") or []),
@@ -564,7 +570,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             if not fn:
                 return self.reply(404, {"error": "没有这个动作:" + action})
             return self.reply(200, fn())
-        except (ValueError, KeyError, OSError, StopIteration) as e:
+        except (ValueError, KeyError, OSError, StopIteration, json.JSONDecodeError) as e:
             return self.reply(400, {"error": str(e) or type(e).__name__})
 
     def do_POST(self):

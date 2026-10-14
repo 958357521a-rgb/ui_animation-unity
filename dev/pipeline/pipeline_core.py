@@ -125,30 +125,148 @@ def save(job):
     return job
 
 
+def _thumb(j):
+    """任务卡片缩略图:第一个资源的整体预览(Figma 插件发来的),没有就用它的第一张切图"""
+    for a in j.get("assets", []):
+        if a.get("preview"):
+            return a["preview"]
+        live = [s for s in a.get("slices", []) if s.get("role") != "skip"] or a.get("slices", [])
+        if live:
+            return live[0]["file"]
+    return None
+
+
 def list_jobs():
+    """任务中心用:每个任务的概况(含回收站里的,deleted 有值 = 在回收站)"""
     out = []
     for f in glob.glob(os.path.join(JOBS, "*", "job.json")):
         try:
             j = json.load(open(f, encoding="utf-8"))
         except ValueError:
             continue
-        out.append({k: j.get(k) for k in ("id", "name", "standard", "mode", "created", "updated")} | {
-            "assets": len(j.get("assets", [])), "slices": sum(len(a["slices"]) for a in j.get("assets", []))})
+        b = j.get("built") or {}
+        out.append({k: j.get(k) for k in ("id", "name", "standard", "mode", "created", "updated", "note", "status", "deleted")} | {
+            "assets": len(j.get("assets", [])), "slices": sum(len(a["slices"]) for a in j.get("assets", [])),
+            "ids": [a.get("id") for a in j.get("assets", []) if a.get("id")], "thumb": _thumb(j),
+            "built": {"time": b.get("time"), "file": os.path.basename(b["package"])} if b.get("package") and os.path.exists(b["package"]) else None,
+            "checked": j.get("checked")})
     return sorted(out, key=lambda x: x.get("updated") or "", reverse=True)
 
 
-def create_job(name, sid, mode="new"):
+def create_job(name, sid, mode="new", note=""):
     std = standard(sid)
     if std.get("replaceOnly"):
         mode = "replace"
     jid = datetime.datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(2)
     return save({"id": jid, "name": name or std["name"] + "批处理", "standard": sid, "mode": mode if mode in ("new", "replace") else "new",
-                 "created": now(), "refs": [], "assets": [], "ai": {"state": "idle"}})
+                 "created": now(), "note": note or "", "status": "doing", "refs": [], "assets": [], "ai": {"state": "idle"}})
 
 
 def delete_job(jid):
+    """彻底删除(原图、新图、交付包都删掉)"""
     shutil.rmtree(job_dir(jid), ignore_errors=True)
     return {"ok": True}
+
+
+def trash_job(jid, restore=False):
+    """删除 = 先进回收站(任务中心里能恢复);restore=True 从回收站恢复"""
+    with job_lock(jid):
+        job = load(jid)
+        if restore:
+            job.pop("deleted", None)
+        else:
+            job["deleted"] = now()
+        return save(job)
+
+
+def duplicate_job(jid):
+    """复制一份(原图、AI 新图、动效、配置字段都带上;交付包不带),名字加「副本」"""
+    src = job_dir(jid); job = load(jid)
+    nid = datetime.datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(2)
+    shutil.copytree(src, job_dir(nid), ignore=shutil.ignore_patterns("build", "job.json.tmp"))
+    job.update({"id": nid, "name": job["name"] + "(副本)", "created": now(), "status": "doing", "ai": {"state": "idle"}})
+    for k in ("built", "deleted", "checked"):
+        job.pop(k, None)
+    return save(job)
+
+
+def _exports_dir():
+    return os.path.join(JOBS, "_exports")   # 跟着 JOBS 走(自测时 JOBS 换成临时目录)
+
+
+def export_jobs(ids):
+    """导出任务包(.zip):每个任务一个文件夹(job.json + 原图 + AI 新图 + 交付包),同事那边「导入任务」就能接着做。
+    ids 为空 = 全部(不含回收站);返回包的路径(本地服务能直接下载 exports/pipeline/_exports/…)"""
+    import zipfile
+    jobs = [j for j in list_jobs() if (j["id"] in ids if ids else not j.get("deleted"))]
+    if not jobs:
+        raise ValueError("没有可导出的任务")
+    os.makedirs(_exports_dir(), exist_ok=True)
+    name = (safe(jobs[0]["name"]) if len(jobs) == 1 else f"资源批处理_全部任务_{len(jobs)}个") + "_" + datetime.datetime.now().strftime("%m%d-%H%M") + ".zip"
+    path = os.path.join(_exports_dir(), name)
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("README.txt", "BUD UI Studio 资源批处理任务包:工作台「资源批处理」→ 任务中心 →「导入任务」选这个文件。\n")
+        for j in jobs:
+            d = job_dir(j["id"])
+            for root, _, files in os.walk(d):
+                for f in files:
+                    if f.endswith(".tmp"):
+                        continue
+                    full = os.path.join(root, f)
+                    z.write(full, j["id"] + "/" + os.path.relpath(full, d).replace("\\", "/"))
+    return {"ok": True, "jobs": len(jobs), "file": name, "url": "exports/pipeline/_exports/" + name, "path": path}
+
+
+def import_jobs(b64):
+    """导入任务包:每个任务都换一个新 id(不会覆盖本机已有的任务);同名的加「(导入)」"""
+    import zipfile
+    data = base64.b64decode(b64)
+    try:
+        z = zipfile.ZipFile(io.BytesIO(data))
+    except zipfile.BadZipFile:
+        raise ValueError("不是任务包(.zip)")
+    names = z.namelist()
+    tops = sorted({n.split("/", 1)[0] for n in names if n.count("/") >= 1 and n.split("/", 1)[1] == "job.json"})
+    if not tops:
+        raise ValueError("任务包里没有任务(找不到 job.json)")
+    have = {j["name"] for j in list_jobs()}
+    out = []
+    for t in tops:
+        job = json.loads(z.read(t + "/job.json").decode("utf-8"))
+        standard(job.get("standard", ""))   # 本机没有这个标准就报错
+        nid = datetime.datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(2)
+        d = job_dir(nid); base = os.path.realpath(d)
+        for n in names:
+            if not n.startswith(t + "/") or n.endswith("/") or n == t + "/job.json":
+                continue
+            dst = os.path.realpath(os.path.join(d, n[len(t) + 1:]))
+            if not dst.startswith(base + os.sep):   # 防止包里的路径跳出任务文件夹
+                raise ValueError("任务包里有不安全的路径:" + n)
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            open(dst, "wb").write(z.read(n))
+        job.update({"id": nid, "ai": {"state": "idle"}})
+        if job["name"] in have:
+            job["name"] += "(导入)"
+        job.pop("deleted", None)
+        b = job.get("built") or {}
+        if b.get("package"):
+            b["package"] = os.path.join(d, "build", os.path.basename(b["package"])).replace("\\", "/")
+        save(job); out.append({"id": nid, "name": job["name"]})
+    return {"ok": True, "jobs": out}
+
+
+def reveal(jid=None, what="build"):
+    """在资源管理器里打开:任务的交付包(what=build)、导出的任务包文件夹(what=exports)"""
+    if what == "exports":
+        target = _exports_dir(); os.makedirs(target, exist_ok=True)
+    else:
+        b = (load(jid).get("built") or {}).get("package")
+        if not b or not os.path.exists(b):
+            raise ValueError("这个任务还没生成交付包")
+        target = b
+    if sys.platform == "win32":
+        subprocess.Popen(["explorer", "/select,", os.path.normpath(target)] if os.path.isfile(target) else ["explorer", os.path.normpath(target)])
+    return {"ok": True, "path": target}
 
 
 def _png(b64):
@@ -207,6 +325,10 @@ def update(jid, patch):
         job = load(jid)
         if patch.get("name"):
             job["name"] = patch["name"]
+        if "note" in patch:
+            job["note"] = str(patch["note"] or "")[:500]
+        if patch.get("status") in ("doing", "done"):
+            job["status"] = patch["status"]
         if patch.get("mode") in ("new", "replace") and not standard(job["standard"]).get("replaceOnly"):
             job["mode"] = patch["mode"]
         for a in job["assets"]:

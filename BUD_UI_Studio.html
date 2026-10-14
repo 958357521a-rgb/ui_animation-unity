@@ -115,7 +115,7 @@
   #playLog .ev b{color:var(--acc);font-weight:600}
   #playLog .t{color:var(--dim);margin-right:6px;font-variant-numeric:tabular-nums}
   /* 任务:每个改版任务(一个模块)单独存一份工程,任务首页统一管理 */
-  #taskBtn{display:flex;align-items:center;gap:6px;max-width:280px;border-color:var(--acc)}
+  #taskBtn{display:flex;align-items:center;gap:6px;max-width:340px;border-color:var(--acc)}
   #taskBtn .tn{overflow:hidden;text-overflow:ellipsis;font-weight:600}
   #taskLock{position:absolute;top:12px;left:50%;transform:translateX(-50%);z-index:60;display:none;gap:10px;align-items:center;background:var(--panel);border:1px solid var(--warn);color:var(--warn);border-radius:99px;padding:6px 8px 6px 16px;box-shadow:0 8px 30px #0009;white-space:nowrap}
   #taskHome{position:fixed;inset:0;z-index:800;background:var(--bg);display:none;flex-direction:column}
@@ -175,7 +175,7 @@
       <button class="on" title="界面改版:Figma 界面 → 摆布局、配动效 → 交付包 / 覆盖到 Unity">界面改版</button>
       <button onclick="openPipeline()" title="批量处理头像框等切好图的资源:从 Figma 插件收切图 → AI 重绘 → 规则检查 → 配晃动 / 变色等动效 → 生成 unitypackage / 放回 Figma">资源批处理</button>
     </div>
-    <button id="taskBtn" onclick="showTaskHome()" title="任务管理:每个改版任务单独一份工程(素材、动效、覆盖目标),在这里新建 / 切换 / 整理"><span>▦</span><span class="tn">任务</span><span style="color:var(--dim)">▾</span></button>
+    <button id="taskBtn" onclick="showTaskHome()" title="任务中心:每个改版任务单独一份工程(素材、动效、覆盖目标),在这里新建 / 切换 / 编辑信息 / 复制 / 导出 / 删除"><span>▦</span><b>任务中心</b><span style="color:var(--dim)">·</span><span class="tn">任务</span><span style="color:var(--dim)">▾</span></button>
     <button onclick="newTaskDialog()" title="新建一个改版任务:空白画布,再导入这个任务的素材">＋ 新建任务</button>
     <span class="chip"><b>①</b> 从 Figma 获取</span>
     <button class="primary" onclick="importPluginPackage()" title="用 Figma 插件「BUD UI Studio 导出」导出的界面包,不消耗 Figma 调用额度">导入插件包</button>
@@ -243,6 +243,7 @@
       <button data-k="pipe" onclick="setHomeTab('pipe')" title="批量处理头像框等切好图的资源:从 Figma 插件收切图 → AI 重绘 → 规则检查 → 配晃动 / 变色等动效 → 生成 unitypackage / 放回 Figma">资源批处理</button>
     </div>
     <div class="th-tools" data-tab="ui">
+      <b style="white-space:nowrap">任务中心</b>
       <div class="th-tabs" id="taskTabs"></div>
       <span style="flex:1"></span>
       <input id="taskSearch" placeholder="搜索任务名 / 模块名 / 备注" oninput="renderTaskHome()">
@@ -1539,7 +1540,7 @@ function renderTaskHome(){
       : (cur ? `<button class="primary" onclick="hideTaskHome()">继续编辑</button>` : `<button class="primary" ${open}>打开</button>`)
         + `<button onclick="editTask('${t.id}')" title="改任务名、模块名、备注">编辑信息</button>`
         + `<button onclick="dupTask('${t.id}')" title="复制一份(含素材和动效),在副本上做另一个版本">复制</button>`
-        + `<button onclick="saveTaskFile('${t.id}')" title="存成 .budui.json 文件:备份或发给同事">保存为文件</button>`
+        + `<button onclick="saveTaskFile('${t.id}')" title="导出成 .budui.json 工程文件(含贴图):备份或发给同事,对方「从工程文件导入」">导出</button>`
         + `<button onclick="setTaskDone('${t.id}', ${!done})">${done ? "移回进行中" : "标记完成"}</button>`
         + `<button class="del" onclick="trashTask('${t.id}')">删除</button>`;
     const unity = t.unity && t.unity.prefab ? `已覆盖到 Unity:<b>${esc(t.unity.prefab.split("/").pop())}</b>${t.unity.time ? " · " + fmtTime(t.unity.time) : ""}` : "还没覆盖到 Unity";
