@@ -151,8 +151,27 @@ function hasOwnLook(n) {
 function progress(text) { figma.ui.postMessage({ type: "progress", text: text }); }
 
 // 被祖先的裁切(滚动区 Viewport / Content 这类 clipsContent)挡住一部分或全部的节点。
-// exportAsync 默认按"屏幕上看得到的部分"出图:滚动区外的卡片会被切掉一半或只剩 1×1,
-// 所以这类节点改用 useAbsoluteBounds 按自身外框完整出图(不含超出外框的阴影)。
+// exportAsync 默认按"屏幕上看得到的部分"出图:滚动区外的卡片会被切掉一半或只剩 1×1。
+// useAbsoluteBounds 又会按节点外框硬切(放大镜按钮的圆底比外框大一圈,被切成圆角方块),
+// 所以这类节点复制到页面顶层同一绝对坐标(不受任何祖先裁切)再按完整渲染范围出图,出完一定删掉复制品。
+async function exportUnclipped(node, opts) {
+  var bb = node.absoluteBoundingBox;
+  var clone = null;
+  try {
+    clone = node.clone();
+    figma.currentPage.appendChild(clone);
+    clone.x = bb.x; clone.y = bb.y;
+    clone.visible = true;
+    var rb = clone.absoluteRenderBounds;
+    if (!rb) return null;
+    var bytes = await clone.exportAsync(opts);
+    return { bytes: bytes, bounds: box(rb) };
+  } catch (e) {
+    return null;
+  } finally {
+    if (clone) { try { clone.remove(); } catch (e2) {} }
+  }
+}
 function clippedByAncestor(node, screen) {
   var b = node.absoluteBoundingBox;
   if (!b) return false;
@@ -213,12 +232,19 @@ async function doExport(ids) {
       progress("界面 " + (k + 1) + "/" + chosen.length + "「" + screen.name + "」:切图 " + (i + 1) + "/" + renderIds.length);
       try {
         var opts = { format: "PNG", constraint: { type: "SCALE", value: imgScale } };
+        var bytes = null;
         if (clippedByAncestor(idMap[renderIds[i]], screen)) {
-          opts.useAbsoluteBounds = true;
           var sn = findSer(tree, renderIds[i]);
-          if (sn) sn.absoluteRenderBounds = sn.absoluteBoundingBox;   // 位置按完整外框放,和出图范围一致
+          var whole = await exportUnclipped(idMap[renderIds[i]], opts);
+          if (whole) {
+            bytes = whole.bytes;
+            if (sn) sn.absoluteRenderBounds = whole.bounds;              // 位置按复制品的完整渲染范围(含超出外框的圆底、投影)
+          } else {
+            opts.useAbsoluteBounds = true;                               // 复制失败才退回按外框出图(超出外框的部分会被切掉)
+            if (sn) sn.absoluteRenderBounds = sn.absoluteBoundingBox;
+          }
         }
-        var bytes = await idMap[renderIds[i]].exportAsync(opts);
+        if (!bytes) bytes = await idMap[renderIds[i]].exportAsync(opts);
         images[renderIds[i]] = figma.base64Encode(bytes);
         imageCount++;
       } catch (e) {
