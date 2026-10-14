@@ -130,6 +130,25 @@ function planRenderIds(frame) {
 // ---------- 导出 ----------
 function progress(text) { figma.ui.postMessage({ type: "progress", text: text }); }
 
+// 被祖先的裁切(滚动区 Viewport / Content 这类 clipsContent)挡住一部分或全部的节点。
+// exportAsync 默认按"屏幕上看得到的部分"出图:滚动区外的卡片会被切掉一半或只剩 1×1,
+// 所以这类节点改用 useAbsoluteBounds 按自身外框完整出图(不含超出外框的阴影)。
+function clippedByAncestor(node, screen) {
+  var b = node.absoluteBoundingBox;
+  if (!b) return false;
+  for (var p = node.parent; p && p !== screen; p = p.parent) {
+    if (!p.clipsContent || !p.absoluteBoundingBox) continue;
+    var a = p.absoluteBoundingBox;
+    if (b.x < a.x - 0.5 || b.y < a.y - 0.5 || b.x + b.width > a.x + a.width + 0.5 || b.y + b.height > a.y + a.height + 0.5) return true;
+  }
+  return false;
+}
+function findSer(tree, id) {
+  if (tree.id === id) return tree;
+  for (var i = 0; i < (tree.children || []).length; i++) { var r = findSer(tree.children[i], id); if (r) return r; }
+  return null;
+}
+
 async function doExport(ids) {
   var chosen = candidates().list.filter(function (n) { return ids.indexOf(n.id) >= 0; });
   if (!chosen.length) throw new Error("没有勾选要导出的界面");
@@ -153,7 +172,13 @@ async function doExport(ids) {
     for (var i = 0; i < renderIds.length; i++) {
       progress("界面 " + (k + 1) + "/" + chosen.length + "「" + screen.name + "」:切图 " + (i + 1) + "/" + renderIds.length);
       try {
-        var bytes = await idMap[renderIds[i]].exportAsync({ format: "PNG", constraint: { type: "SCALE", value: imgScale } });
+        var opts = { format: "PNG", constraint: { type: "SCALE", value: imgScale } };
+        if (clippedByAncestor(idMap[renderIds[i]], screen)) {
+          opts.useAbsoluteBounds = true;
+          var sn = findSer(tree, renderIds[i]);
+          if (sn) sn.absoluteRenderBounds = sn.absoluteBoundingBox;   // 位置按完整外框放,和出图范围一致
+        }
+        var bytes = await idMap[renderIds[i]].exportAsync(opts);
         images[renderIds[i]] = figma.base64Encode(bytes);
         imageCount++;
       } catch (e) {
