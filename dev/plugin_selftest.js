@@ -14,17 +14,36 @@ function png(hex) {
 }
 
 // ---- 模拟 Figma 节点 ----
+// clone:复制一份挂在原父级下(记在 liveClones,remove() 后移除);实例的子节点脱离前不可删;顶层 appendChild 后 x/y 即绝对坐标
+const liveClones = new Set(), cloneLog = [];
+const pageChildren = [];
+function makeClone(src, color) {
+  const bb = src.absoluteBoundingBox;
+  const c = Object.assign({}, src, { id: src.id + "-clone", parent: src.parent || null, x: bb.x, y: bb.y, _w: bb.width, _h: bb.height });
+  c.children = (src.children || []).map(ch => { const k = Object.assign({}, ch); k.remove = () => { if (c.type === "INSTANCE") throw new Error("实例的子节点不能删"); c.children.splice(c.children.indexOf(k), 1); }; return k; });
+  Object.defineProperty(c, "absoluteBoundingBox", { get() { return { x: c.x, y: c.y, width: c._w, height: c._h }; }, enumerable: true });
+  Object.defineProperty(c, "absoluteRenderBounds", { get() { const m = c.effects.length ? 20 : 0; return { x: c.x - m, y: c.y - m, width: c._w + 2 * m, height: c._h + 2 * m }; }, enumerable: true });
+  c.resize = (w, h) => { c._w = w; c._h = h; };
+  c.detachInstance = () => { c.type = "FRAME"; return c; };
+  c.remove = () => { liveClones.delete(c); const i = pageChildren.indexOf(c); if (i >= 0) pageChildren.splice(i, 1); };
+  c.exportAsync = async opt => { cloneLog.push({ type: c.type, children: c.children.length, onPage: pageChildren.includes(c), x: c.x, y: c.y, w: c._w, h: c._h, layoutMode: c.layoutMode, scale: opt && opt.constraint && opt.constraint.value }); return png(color); };
+  liveClones.add(c);
+  return c;
+}
 const MIXED = Symbol("mixed");
 let seq = 100;
 const exported = [];
 function node(type, name, x, y, w, h, opt = {}, children) {
   const id = `${seq++}:${seq}`;
-  const n = { id, type, name, visible: opt.visible !== false, absoluteBoundingBox: { x, y, width: w, height: h }, absoluteRenderBounds: { x, y, width: w, height: h }, opacity: 1, strokes: opt.strokes || [], effects: [] };
+  const n = { id, type, name, visible: opt.visible !== false, absoluteBoundingBox: { x, y, width: w, height: h }, absoluteRenderBounds: { x, y, width: w, height: h }, opacity: 1, strokes: opt.strokes || [], effects: opt.effects || [] };
+  if (opt.layoutMode) n.layoutMode = opt.layoutMode;
   if (type !== "GROUP") n.fills = opt.fills || [];
   if (["FRAME", "INSTANCE", "COMPONENT"].includes(type)) n.clipsContent = !!opt.clip;
   if (children) n.children = children;
   const color = opt.color || "#888888";
   n.exportAsync = async () => { exported.push(name); return png(color); };
+  n.clone = () => makeClone(n, color);
+  if (type === "INSTANCE") n.detachInstance = () => { throw new Error("原节点不应被 detach"); };
   return n;
 }
 const solid = hex => [{ type: "SOLID", visible: true, opacity: 1, color: { r: parseInt(hex.slice(1, 3), 16) / 255, g: parseInt(hex.slice(3, 5), 16) / 255, b: parseInt(hex.slice(5, 7), 16) / 255 } }];
@@ -76,6 +95,11 @@ const screen05 = node("FRAME", "05 · 充值福利 / 奖励总览", X, Y, 2436, 
     ])
   ]),
   text("next-tier", X + 800, Y + 990, 650, 40, "再充值 30 元,解锁下一档", 30, 400, { mixedFills: true }),
+  // 含文字、自身有白底 + 投影的实例(充值界面的 Amount/RechargeLibrary):外观要靠 #bg 底图保留
+  node("INSTANCE", "Amount/RechargeLibrary", X + 163, Y + 1070, 610, 96, { fills: solid("#ffffff"), effects: [{ type: "DROP_SHADOW", visible: true }], layoutMode: "HORIZONTAL" }, [
+    node("FRAME", "金额可见性", X + 190, Y + 1090, 52, 52, { color: "#ffd84a" }, [node("VECTOR", "eye2", X + 190, Y + 1090, 52, 52, { color: "#ffd84a" })]),
+    text("amount-lib", X + 260, Y + 1100, 319, 41, "充值库 128 元", 30, 500)
+  ]),
   node("INSTANCE", "04_CTA", X + 1873, Y + 950, 400, 120, {}, [
     rect("background", X + 1873, Y + 950, 400, 120, "#ffd84a"),
     text("label", X + 1923, Y + 980, 300, 61, "前往充值", 44, 700, { color: "#3a2f00", align: "CENTER" })
@@ -95,7 +119,7 @@ const board = node("FRAME", "Unity中间版", 0, 0, 7980, 14100, {}, [sheet99, s
 const messages = [];
 const figma = {
   mixed: MIXED,
-  currentPage: { selection: [board] },
+  currentPage: { selection: [board], children: pageChildren, appendChild(c) { pageChildren.push(c); c.parent = this; } },
   root: { name: "充值福利 xisi" },
   showUI() {}, on() {}, closePlugin() {},
   ui: { postMessage: m => messages.push(m), onmessage: null },
@@ -126,7 +150,13 @@ vm.runInNewContext(fs.readFileSync(PLUGIN, "utf8"), { figma, __html__: "", conso
   ok(!names.includes("x"), "未勾选的组件表不导出");
   const nt = (function find(n) { if (n.name === "next-tier") return n; for (const c of n.children || []) { const r = find(c); if (r) return r; } })(s05.frame);
   ok(nt && Array.isArray(nt.fills) && nt.fills[0].type === "SOLID", "混合填色文字取首字颜色,可正常序列化");
-  ok(Object.keys(s05.images).length === 41, `界面 05 切图数 = ${Object.keys(s05.images).length}(预期 41)`);
+  ok(Object.keys(s05.images).length === 43, `界面 05 切图数 = ${Object.keys(s05.images).length}(预期 43 = 41 + 金额可见性图标 + 容器底图 #bg)`);
+  const lib = (function find(n) { if (n.name === "Amount/RechargeLibrary") return n; for (const c of n.children || []) { const r = find(c); if (r) return r; } })(s05.frame);
+  const bgKeys = Object.keys(s05.images).filter(k => k.endsWith("#bg"));
+  ok(lib && bgKeys.length === 1 && bgKeys[0] === lib.id + "#bg", "含文字且有白底+投影的 INSTANCE 产出 #bg 底图,其它容器(无自身外观)不产出");
+  ok(lib && lib.bgRenderBounds && lib.bgRenderBounds.x === lib.absoluteBoundingBox.x - 20 && lib.bgRenderBounds.width === lib.absoluteBoundingBox.width + 40, "bgRenderBounds 含投影外扩,序列化在该节点上");
+  ok(cloneLog.length === 1 && cloneLog[0].type === "FRAME" && cloneLog[0].children === 0 && cloneLog[0].onPage && cloneLog[0].layoutMode === "NONE" && cloneLog[0].x === lib.absoluteBoundingBox.x && cloneLog[0].y === lib.absoluteBoundingBox.y && cloneLog[0].w === 610 && cloneLog[0].h === 96, "底图出图时 clone 已脱离实例、清空子节点、在页面顶层同一绝对坐标、尺寸不变");
+  ok(liveClones.size === 0 && pageChildren.length === 0, "导出结束后文档里不残留 clone");
   fs.mkdirSync(path.dirname(OUT), { recursive: true });
   fs.writeFileSync(OUT, done.json);
   console.log(checks.join("\n"));

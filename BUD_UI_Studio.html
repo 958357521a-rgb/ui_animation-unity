@@ -947,6 +947,7 @@ const PLUGIN_RULES = "v1";
 const POPUP_LAYER = /^(modal|dialog|popup)\b|^(modal|dialog|popup)\/|弹窗|遮罩/i;
 function isPopupFrame(frame){ return (frame.children || []).some(c => c.visible !== false && POPUP_LAYER.test(c.name)); }
 // 规划一个界面:哪些图层保留为文字/分组、哪些渲染成切图(与 figma-plugin/code.js 的 planRenderIds 规则一致)
+// 注意:插件额外导出「含文字容器自身的底图」#bg(images["<节点id>#bg"] + 节点字段 bgRenderBounds,切图集合不变),REST 路径没有;有的话容器最前面多一个「/底」image 子节点
 function planScreen(frame, kind){
   const fb = frame.absoluteBoundingBox;
   const scale = STAGE_W / fb.width; // 宽度对齐 2436,与主工程 CanvasScaler 一致
@@ -956,7 +957,7 @@ function planScreen(frame, kind){
   const liveText = t => { const fam = (t.style && t.style.fontFamily) || ""; const fills = (t.fills||[]).filter(visible);
     return /source han sans|思源黑|noto sans (sc|cjk)|noto sans s chinese|montserrat|pingfang|苹方|microsoft yahei|微软雅黑/i.test(fam)
       && fills.every(f => f.type === "SOLID") && !(t.effects||[]).some(visible) && !(t.strokes||[]).some(visible); };
-  const renderIds = []; const stats = {text:0, container:0, scroll:0};
+  const renderIds = [], bgIds = []; const stats = {text:0, container:0, scroll:0};
   const plan = (node, origin, depth) => {
     const out = [];
     for (const c of (node.children||[])){
@@ -966,6 +967,7 @@ function planScreen(frame, kind){
       if (c.type === "TEXT" && liveText(c)){ out.push({kind:"text", src:c, rect:rel(box)}); stats.text++; continue; }
       if (c.children && c.children.length && hasText(c) && depth < 8){
         const item = {kind:"container", src:c, rect:rel(box), children:plan(c, box, depth + 1)};
+        if (c.bgRenderBounds){ const b = c.bgRenderBounds; item.bg = {id: c.id + "#bg", rect: {x: Math.round((b.x - box.x) * scale), y: Math.round((b.y - box.y) * scale), w: Math.max(1, Math.round(b.width * scale)), h: Math.max(1, Math.round(b.height * scale))}}; bgIds.push(item.bg.id); }
         const wide = item.children.find(k => k.kind === "container" && (k.rect.w > item.rect.w + 4 || k.rect.h > item.rect.h + 4));
         if (c.clipsContent && wide){ item.scroll = wide.rect.w > item.rect.w + 4 ? "h" : "v"; item.scrollContent = wide; stats.scroll++; }
         else if (c.clipsContent) item.clip = true;
@@ -977,14 +979,14 @@ function planScreen(frame, kind){
   };
   let top = frame;
   if (kind === "popup"){ const kids = frame.children || []; const i = kids.findIndex(c => visible(c) && POPUP_LAYER.test(c.name)); if (i > 0) top = Object.assign({}, frame, {children: kids.slice(i)}); }
-  return {tree: plan(top, fb, 0), renderIds, stats, scale};
+  return {tree: plan(top, fb, 0), renderIds, bgIds, stats, scale};
 }
 /* opts.mode:"new" 新建模块(默认)/"add" 作为新页面加入 /"replace" 替换当前页;opts.kind:"page"|"popup";opts.silent 批量时不刷新界面 */
 async function buildScreenFromFigma(frame, render, say, opts = {}){
   const kind = opts.kind || "page";
-  const {tree, renderIds, stats, scale} = planScreen(frame, kind);
+  const {tree, renderIds, bgIds, stats, scale} = planScreen(frame, kind);
   say(`界面「${frame.name}」:${stats.text} 个文本、${renderIds.length} 张切图、${stats.container} 个分组${stats.scroll ? `、${stats.scroll} 个滚动区` : ""},正在渲染切图…`);
-  const rendered = await render(renderIds, Math.min(4, Math.max(0.25, scale)));
+  const rendered = await render(renderIds.concat(bgIds), Math.min(4, Math.max(0.25, scale)));   // bgIds 只有插件包才有(REST 路径为空)
   const missing = renderIds.filter(id => !rendered[id]).length;
   // 建节点(Figma 子级顺序 = 由底到顶,与画布/Unity 渲染顺序一致)
   const mode = opts.mode || "new";
@@ -1013,6 +1015,12 @@ async function buildScreenFromFigma(frame, render, say, opts = {}){
     if (item.kind === "container"){
       const n = addNode("container", parent, true); Object.assign(n, item.rect); n.figma = Object.assign({}, item.rect); n.name = c.name.slice(0, 32);
       if (item.scroll) n.scroll = item.scroll; if (item.clip) n.clip = true;
+      if (item.bg && rendered[item.bg.id]){   // 插件导出的容器自身外观(底色/描边/投影),作为最底层的装饰图
+        const aid = "a" + Date.now() + Math.floor(Math.random() * 1e6);
+        proj.assets[aid] = {name: assetName(c.name + "_bg"), dataUrl: rendered[item.bg.id], w: item.bg.rect.w, h: item.bg.rect.h};
+        const b = addNode("image", n, true); Object.assign(b, item.bg.rect); b.figma = Object.assign({}, item.bg.rect);
+        b.name = c.name.slice(0, 30) + "/底"; b.spriteId = aid; b.color = "#ffffff"; b.alpha = 1;
+      }
       for (const k of item.children){
         const child = make(k, n);
         if (child && item.scrollContent === k){ child.isScrollContent = true; child.anchor = item.scroll === "h" ? "l" : "t"; }
@@ -1110,9 +1118,9 @@ async function importScreens(frames, render, opts){
   // 全部切图按缩放比例分组后一起渲染:REST 每 100 张 1 次调用,插件包直接取包内切图
   const groups = new Map();
   for (const p of ordered){
-    const {renderIds, scale} = planScreen(p.frame, p.kind), s = Math.min(4, Math.max(0.25, scale));
+    const {renderIds, bgIds, scale} = planScreen(p.frame, p.kind), s = Math.min(4, Math.max(0.25, scale));
     if (!groups.has(s)) groups.set(s, new Set());
-    renderIds.forEach(id => groups.get(s).add(id));
+    renderIds.concat(bgIds).forEach(id => groups.get(s).add(id));
   }
   const rendered = {};
   for (const [s, ids] of groups){ say(`渲染切图(${ids.size} 张)…`); Object.assign(rendered, await render([...ids], s)); }

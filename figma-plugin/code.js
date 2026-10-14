@@ -126,6 +126,26 @@ function planRenderIds(frame) {
   })(frame, 0);
   return ids;
 }
+// 额外导出(不改变上面的切图集合):planRenderIds 走进去的含文字容器,自身的外观(填充/描边/投影)否则整个丢失,
+// 这里列出这些容器(判定与 planRenderIds 的 walk 同条件),doExport 再给有可见外观的出一张去掉子节点的底图 "<id>#bg"。
+// Studio 的 REST 拉取路径没有这种图;工作台导入时只认包里有 #bg 的容器。
+function planBgIds(frame) {
+  var ids = [];
+  (function walk(node, depth) {
+    (node.children || []).forEach(function (c) {
+      if (!visibleNode(c) || !c.absoluteBoundingBox) return;
+      if (c.type === "TEXT" && liveText(c)) return;
+      if (c.children && c.children.length && hasText(c) && depth < 8) { ids.push(c.id); walk(c, depth + 1); return; }
+    });
+  })(frame, 0);
+  return ids;
+}
+function hasOwnLook(n) {
+  function vis(list) {
+    return !!list && list !== figma.mixed && list.some(function (p) { return p.visible !== false && (p.opacity === undefined || p.opacity > 0); });
+  }
+  return ("fills" in n && vis(n.fills)) || ("strokes" in n && vis(n.strokes)) || ("effects" in n && vis(n.effects));
+}
 
 // ---------- 导出 ----------
 function progress(text) { figma.ui.postMessage({ type: "progress", text: text }); }
@@ -147,6 +167,26 @@ function findSer(tree, id) {
   if (tree.id === id) return tree;
   for (var i = 0; i < (tree.children || []).length; i++) { var r = findSer(tree.children[i], id); if (r) return r; }
   return null;
+}
+
+// 容器自身外观底图:clone → (实例先脱离)→ 清掉全部子节点 → 挪到页面顶层同一绝对坐标(不受祖先裁切)→ 出图 → 一定删掉 clone
+async function exportBg(node, imgScale) {
+  var bb = node.absoluteBoundingBox;
+  var clone = null;
+  try {
+    clone = node.clone();
+    if (clone.type === "INSTANCE") clone = clone.detachInstance() || clone;
+    if ("layoutMode" in clone && clone.layoutMode !== "NONE") clone.layoutMode = "NONE";   // 自动布局会在清空子节点后收缩尺寸
+    for (var i = clone.children.length - 1; i >= 0; i--) clone.children[i].remove();
+    figma.currentPage.appendChild(clone);
+    clone.x = bb.x; clone.y = bb.y;
+    clone.resize(Math.max(0.01, bb.width), Math.max(0.01, bb.height));
+    clone.visible = true;
+    var bytes = await clone.exportAsync({ format: "PNG", constraint: { type: "SCALE", value: imgScale } });
+    return { b64: figma.base64Encode(bytes), bounds: box(clone.absoluteRenderBounds || clone.absoluteBoundingBox) };
+  } finally {
+    if (clone) { try { clone.remove(); } catch (e2) {} }
+  }
 }
 
 async function doExport(ids) {
@@ -182,6 +222,19 @@ async function doExport(ids) {
         images[renderIds[i]] = figma.base64Encode(bytes);
         imageCount++;
       } catch (e) {
+        skipped++;
+      }
+    }
+    var bgIds = planBgIds(tree);
+    for (var j = 0; j < bgIds.length; j++) {
+      var bn = idMap[bgIds[j]];
+      if (!hasOwnLook(bn)) continue;
+      progress("界面 " + (k + 1) + "/" + chosen.length + "「" + screen.name + "」:容器底图 " + (j + 1) + "/" + bgIds.length);
+      try {
+        var bg = await exportBg(bn, imgScale);
+        var bs = findSer(tree, bgIds[j]);
+        if (bs && bg.bounds) { images[bgIds[j] + "#bg"] = bg.b64; bs.bgRenderBounds = bg.bounds; imageCount++; }
+      } catch (e3) {
         skipped++;
       }
     }
