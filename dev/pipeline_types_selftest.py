@@ -241,6 +241,36 @@ ok(e["themeId"] == 9046 and e["pgcId"] == "150109046" and e["colorInfo"]["info_b
 readme = open(res["readme"], encoding="utf-8").read()
 ok('{"configs": [...]}' in readme and "## 导入后" in readme, "README 说明加进 configs 数组、导入后要做的事")
 
+print("[5] 任务中心:编辑信息 / 完成 / 回收站 / 复制 / 导出导入任务包")
+jid = job["id"]
+core.update(jid, {"name": "改名后的主页皮肤", "note": "自测备注", "status": "done"})
+lj = {j["id"]: j for j in core.list_jobs()}
+ok(lj[jid]["name"] == "改名后的主页皮肤" and lj[jid]["note"] == "自测备注" and lj[jid]["status"] == "done", "编辑信息(名称、备注)、标记完成")
+ok(lj[jid]["thumb"] and lj[jid]["built"] and lj[jid]["built"]["file"].endswith(".unitypackage"), "任务概况带缩略图和最近的交付包")
+core.trash_job(jid)
+ok(next(j for j in core.list_jobs() if j["id"] == jid).get("deleted"), "删除先进回收站(任务还在,带删除时间)")
+core.trash_job(jid, restore=True)
+ok(not next(j for j in core.list_jobs() if j["id"] == jid).get("deleted"), "从回收站恢复")
+dup = core.duplicate_job(jid)
+ok(dup["name"].endswith("(副本)") and dup["id"] != jid and not dup.get("built") and len(dup["assets"]) == 1
+   and os.path.exists(os.path.join(core.job_dir(dup["id"]), dup["assets"][0]["slices"][0]["file"])), "复制:原图一起带上,交付包不带")
+ex = core.export_jobs([jid, dup["id"]])
+ok(ex["jobs"] == 2 and os.path.exists(ex["path"]), "导出任务包(2 个任务一个 zip)")
+before = len(core.list_jobs())
+imp = core.import_jobs(base64.b64encode(open(ex["path"], "rb").read()).decode())
+after = core.list_jobs()
+ok(len(imp["jobs"]) == 2 and len(after) == before + 2 and all(x["name"].endswith("(导入)") for x in imp["jobs"]), "导入任务包:换新 id、同名加「(导入)」,不覆盖已有任务")
+ij = core.load(imp["jobs"][0]["id"])
+ok(os.path.exists(os.path.join(core.job_dir(ij["id"]), ij["assets"][0]["slices"][0]["file"])), "导入的任务原图齐全,能接着做")
+import zipfile
+bad = io.BytesIO(); zz = zipfile.ZipFile(bad, "w"); zz.writestr("x/job.json", json.dumps({"name": "坏包", "standard": "title", "assets": []})); zz.writestr("x/../../escape.txt", "x"); zz.close()
+try:
+    core.import_jobs(base64.b64encode(bad.getvalue()).decode()); ok(False, "任务包里跳出文件夹的路径会被拒绝")
+except ValueError:
+    ok(True, "任务包里跳出文件夹的路径会被拒绝")
+core.delete_job(dup["id"])
+ok(not any(j["id"] == dup["id"] for j in core.list_jobs()), "彻底删除")
+
 if "--keep" in sys.argv:
     dst = sys.argv[sys.argv.index("--keep") + 1]; os.makedirs(dst, exist_ok=True)
     for k in kept:
