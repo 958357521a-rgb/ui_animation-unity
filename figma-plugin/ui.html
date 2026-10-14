@@ -19,6 +19,10 @@
   #prog.ok{color:var(--figma-color-text-success,#14ae5c)}
   #prog.err{color:var(--figma-color-text-danger,#f24822)}
   .warn{color:var(--figma-color-text-warning,#b86200)}
+  button.sec{background:transparent;color:var(--figma-color-text-brand,#18a0fb);border:1px solid var(--figma-color-border,#ccc);margin-top:6px}
+  details{margin-top:10px}
+  summary{cursor:pointer;color:var(--figma-color-text-secondary,#777)}
+  details input{width:100%;box-sizing:border-box;padding:6px;margin:4px 0;border:1px solid var(--figma-color-border,#ccc);border-radius:4px;background:transparent;color:inherit;font:inherit}
 </style>
 </head>
 <body>
@@ -26,17 +30,27 @@
   <div id="status" class="hint">请在画布上选中一个或多个界面(Frame),也可以直接选中整张总览画板。</div>
   <div id="list" class="list" style="display:none"></div>
   <div id="bulk" class="bulk" style="display:none"><a id="all">全选</a><a id="none">全不选</a><span id="picked" class="hint"></span></div>
-  <button id="go" disabled>导出</button>
+  <button id="send" disabled>发送到工作台</button>
+  <button id="go" class="sec" disabled>下载 .budfig.json(备用)</button>
+  <details id="conn">
+    <summary>连接设置</summary>
+    <div class="hint">工作台地址</div>
+    <input type="text" id="server" value="http://localhost:8791">
+    <div class="hint">配对码(工作台「资源批处理」页签顶栏;和资源批处理命令共用)</div>
+    <input type="text" id="key" placeholder="8 位配对码">
+  </details>
   <div id="prog" class="hint"></div>
 <script>
-  var screens = [];
+  var screens = [], busy = false, mode = "download";
   var $ = function (id) { return document.getElementById(id); };
   function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]; }); }
   function checkedIds() { return Array.prototype.slice.call(document.querySelectorAll("#list input:checked")).map(function (i) { return i.value; }); }
   function refreshButton() {
     var n = checkedIds().length;
-    $("go").disabled = n === 0;
-    $("go").textContent = n ? "导出选中的 " + n + " 个界面" : "导出";
+    $("go").disabled = n === 0 || busy;
+    $("send").disabled = n === 0 || busy;
+    $("send").textContent = n ? "发送选中的 " + n + " 个界面到工作台" : "发送到工作台";
+    $("go").textContent = n ? "下载选中的 " + n + " 个界面(.budfig.json,备用)" : "下载 .budfig.json(备用)";
     $("picked").textContent = screens.length > 1 ? "已选 " + n + "/" + screens.length : "";
   }
   function render(board) {
@@ -65,16 +79,47 @@
   }
   $("all").onclick = function () { document.querySelectorAll("#list input").forEach(function (i) { i.checked = true; }); refreshButton(); };
   $("none").onclick = function () { document.querySelectorAll("#list input").forEach(function (i) { i.checked = false; }); refreshButton(); };
-  $("go").onclick = function () {
-    $("go").disabled = true; $("prog").className = "hint"; $("prog").textContent = "开始导出…";
+  function startExport(how) {
+    mode = how; busy = true; refreshButton();
+    $("prog").className = "hint"; $("prog").textContent = "开始导出…";
     parent.postMessage({ pluginMessage: { type: "export", ids: checkedIds() } }, "*");
-  };
+  }
+  $("go").onclick = function () { startExport("download"); };
+  $("send").onclick = function () { startExport("send"); };
+  function cfg() { return { server: $("server").value.trim().replace(/\/+$/, ""), key: $("key").value.trim() }; }
+  function saveCfg() { parent.postMessage({ pluginMessage: { type: "saveCfg", cfg: cfg() } }, "*"); }
+  // 把整包 POST 到本机工作台服务(/api/bridge/screens,请求头带配对码);失败原因翻成人话
+  function sendPackage(m) {
+    var c = cfg(), mb = (m.json.length / 1048576).toFixed(1);
+    $("prog").className = "hint"; $("prog").textContent = "正在发送到工作台(约 " + mb + " MB)…";
+    var fail = function (t) { busy = false; $("prog").className = "err"; $("prog").textContent = "发送失败:" + t; $("conn").open = true; refreshButton(); };
+    if (!c.server) { fail("请先在「连接设置」填工作台地址"); return; }
+    fetch(c.server + "/api/bridge/screens", { method: "POST", headers: { "X-BudUI-Bridge": c.key, "Content-Type": "application/json" }, body: m.json })
+      .then(function (r) {
+        return r.json().catch(function () { return {}; }).then(function (j) {
+          if (r.ok) {
+            saveCfg(); busy = false;
+            $("prog").className = "ok";
+            $("prog").innerHTML = "✓ 已发送 " + (j.screens != null ? j.screens : m.count) + " 个界面、" + m.images + " 张切图,回工作台查看"
+              + (m.skipped ? "<br><span class='warn'>有 " + m.skipped + " 个图层导出失败,已跳过</span>" : "");
+            refreshButton();
+          } else if (r.status === 403) fail("配对码不对(或服务不在本机)。到工作台「资源批处理」页签顶栏看配对码,填进「连接设置」");
+          else if (r.status === 404) fail("工作台服务是旧版,没有这个接口。关掉后重新双击桌面「BUD UI Studio」启动新版服务");
+          else if (r.status === 413) fail(j.error || "包太大,少选几个界面分批发送");
+          else fail(j.error || ("服务返回 HTTP " + r.status));
+        });
+      })
+      .catch(function () { fail("连不上工作台服务(" + c.server + ")。工作台开着吗?地址对吗?(Figma 里需用「开发」方式导入插件才允许访问 localhost)"); });
+  }
   onmessage = function (e) {
     var m = e.data && e.data.pluginMessage; if (!m) return;
-    if (m.type === "selection") { screens = m.screens; render(m.board); }
+    if (m.type === "init") { if (m.cfg && m.cfg.server) $("server").value = m.cfg.server; if (m.cfg && m.cfg.key) $("key").value = m.cfg.key; }
+    else if (m.type === "selection") { screens = m.screens; render(m.board); }
     else if (m.type === "progress") { $("prog").className = "hint"; $("prog").textContent = m.text; }
-    else if (m.type === "error") { $("prog").className = "err"; $("prog").textContent = "导出失败:" + m.text; refreshButton(); }
+    else if (m.type === "error") { busy = false; $("prog").className = "err"; $("prog").textContent = "导出失败:" + m.text; refreshButton(); }
+    else if (m.type === "done" && mode === "send") sendPackage(m);
     else if (m.type === "done") {
+      busy = false;
       var base = String(m.fileName || "figma").replace(/[\\/:*?"<>|]/g, "_");
       download(base + "_" + m.count + "个界面.budfig.json", m.json);
       var mb = (m.json.length / 1048576).toFixed(1);

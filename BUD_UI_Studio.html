@@ -221,7 +221,7 @@
     <div id="playLog"><div style="color:var(--dim);margin-bottom:4px">事件日志 · 程序会收到的回调</div><div id="playLogList"></div></div>
     <div id="emptyHint" style="display:none"><div class="card">
       <h2>三步产出可用预制体</h2>
-      <div class="step"><b>①</b><span>在 Figma 里选中界面(或整张总览画板)→ 运行插件<b style="color:var(--ink)">「BUD UI Studio 导出」</b>→ 回到这里点<b style="color:var(--ink)">「导入插件包」</b>——整张总览画板一次导入为一个模块(主页 + 详情页 + 弹窗),图层、文字、位置自动还原,每页按角色配好动效和交互并连好跳转(不消耗 Figma 额度)</span></div>
+      <div class="step"><b>①</b><span>在 Figma 里选中界面(或整张总览画板)→ 运行插件<b style="color:var(--ink)">「BUD UI Studio 导出」</b>→ 点<b style="color:var(--ink)">「发送到工作台」</b>,这里会自动弹出导入提示(不用 Token,也不用下载文件;备用:下载 .budfig.json 后点「导入插件包」)——整张总览画板一次导入为一个模块(主页 + 详情页 + 弹窗),图层、文字、位置自动还原,每页按角色配好动效和交互并连好跳转(不消耗 Figma 额度)</span></div>
       <div class="step"><b>②</b><span>微调布局,给节点配<b style="color:var(--ink)">动效</b>(淡入/弹入/呼吸…)、标记<b style="color:var(--ink)">按钮事件</b>和<b style="color:var(--ink)">动态文本</b></span></div>
       <div class="step"><b>③</b><span>填模块名 → 「导出交付包」,得到 .unitypackage,在主工程里直接导入</span></div>
       <div class="step"><b>↺</b><span>已经有做好的工程?点左上角任务名 →「从共享文件夹载入」或「从工程文件导入」,会加成任务。从别的浏览器搬过来:在原来的浏览器里任务首页点「导出全部任务」,再到这里「从工程文件导入」选那个文件</span></div>
@@ -865,8 +865,8 @@ async function pullFigma(nodeIdOverride){
   const info = parseFigmaUrl($("#figmaUrl").value);
   let storedTok = ""; try{ storedTok = localStorage.getItem("budui_figma_token") || ""; }catch(e){}
   const tokens = [...new Set([$("#figmaToken").value.trim(), storedTok].filter(Boolean))];
+  if (!tokens.length) return pullFromInboxOrGuide();   // 没有 Token:改走插件「发送到工作台」收件箱
   if (!info) return showMsg("链接不对", "请在 Figma 里<b>选中画板(Frame)</b>后 右键 → Copy link,把带 node-id 的链接粘进来。");
-  if (!tokens.length) return showMsg("缺少 Token", "请填写 Figma Token —— 点「拉取画板」旁边的 <b>?</b> 查看 30 秒获取方法。");
   try{ localStorage.setItem("budui_figma_url", $("#figmaUrl").value.trim()); }catch(e){}
   proj.figmaUrl = $("#figmaUrl").value.trim();   // 每个任务记住自己的设计稿链接
   // 输入框里的 Token 失效时,自动改用上次拉取成功时保存的那个
@@ -1215,6 +1215,50 @@ function loadPluginPackage(pkg){
     }
     askBoardImport({title: `导出包里有 ${frames.length} 个界面 —— 勾选后整体导入为一个模块`, items: frames.map(f => ({id: f.id, name: f.name, kind: isPopupFrame(f) ? "popup" : "page"}))},
       sel => runImport(sel, async ids => ids.map(id => frames.find(f => f.id === id)), render));
+}
+/* Figma 插件「发送到工作台」收件箱:插件把整包 POST 给本机服务(/api/bridge/screens,配对码),这里轮询 /api/figma-inbox 收件(只认本机工作台页面,走 localService 口令 / Origin),不需要 Figma Token */
+async function inboxApi(path, method){
+  const svc = await localService();
+  if (!svc) throw new Error(NO_SERVICE);
+  const r = await fetch(svc.base + "/api/figma-inbox" + path, {method: method || "GET", headers: svc.token ? {"X-BudUI-Token": svc.token} : {}});
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || `本地服务返回 ${r.status}(服务是旧版的话重启一下 dev/studio_server.py)`);
+  return j;
+}
+const INBOX_SEEN = "budui_inbox_seen";
+const inboxSeen = () => { try { return JSON.parse(ssGet(INBOX_SEEN) || "[]"); } catch (e) { return []; } };
+function inboxPrompt(it){
+  ssSet(INBOX_SEEN, JSON.stringify(inboxSeen().concat(it.id).slice(-30)));   // 同一包只主动提示一次(取消后仍可从「拉取画板」里导入)
+  const names = (it.screens || []).slice(0, 6).map(escHtml).join("、") + ((it.screens || []).length > 6 ? " 等" : "");
+  askConfirm("收到 Figma 发来的界面", `收到 Figma 发来的「${escHtml(it.file || "未命名")}」${(it.screens || []).length} 个界面,导入到当前任务?<br><span style="color:var(--dim)">${names}(${(it.size / 1048576).toFixed(1)} MB)</span>`, async () => {
+    try {
+      toast("正在读取收到的界面…", 4000);
+      const pkg = await inboxApi("/" + it.id);
+      inboxApi("/" + it.id + "/done", "POST").catch(() => {});
+      loadPluginPackage(pkg);
+    } catch (e) { showMsg("读取失败", escHtml(e.message || e)); }
+  });
+}
+let inboxDelay = 3000;
+async function inboxPoll(){
+  // 页面可见、停在编辑界面、没有别的对话框开着时才查;服务连不上(没开 / 旧版)静默,退避到 15 秒
+  if (!document.hidden && !$("#taskHome").classList.contains("on") && !document.querySelector("dialog[open]")){
+    try {
+      const items = (await inboxApi("")).items || [], seen = inboxSeen();
+      inboxDelay = 3000;
+      const fresh = items.find(it => !seen.includes(it.id));
+      if (fresh) inboxPrompt(fresh);
+    } catch (e) { inboxDelay = 15000; }
+  }
+  setTimeout(inboxPoll, inboxDelay);
+}
+setTimeout(inboxPoll, 3000);
+// 没有 Token 时「拉取画板」:先看收件箱有没有插件发来的包,没有就讲怎么用插件
+async function pullFromInboxOrGuide(){
+  let items = [];
+  try { items = (await inboxApi("")).items || []; } catch (e) {}
+  if (items.length) return inboxPrompt(items[0]);   // 服务端按时间倒序,第一个最新
+  showMsg("用桌面版 Figma 不需要 Token", `<ol style="padding-left:18px"><li>装插件(只装一次):Figma 桌面版 → 插件 → 开发 → 从清单导入 <code>figma-plugin/manifest.json</code></li><li>在 Figma 里选中界面(或整张总览画板),运行「BUD UI Studio 导出」</li><li>点<b>「发送到工作台」</b>,这里会自动弹出导入提示</li></ol>配对码在「资源批处理」页签顶栏(插件「连接设置」里填一次)。工作台要开着(桌面「BUD UI Studio」)。<br><span style="color:var(--dim)">有 Token 也可以继续用链接拉取:填好 Token 和画板链接后点「拉取画板」。</span>`);
 }
 function guessModuleName(name){ const words = (name.match(/[A-Za-z][A-Za-z0-9]*/g) || []).filter(w => !/^unity$/i.test(w)); return words.map(w => w.charAt(0).toUpperCase() + w.slice(1)).join("").slice(0, 40); }
 // 常见中文图层名 → 英文词,让自动生成的事件/数据标识可读(如「Label/累计金额」→ labelTotalAmount)

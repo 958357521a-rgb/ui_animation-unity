@@ -34,6 +34,6 @@
       "http://localhost:8791",
       "http://127.0.0.1:8791"
     ],
-    "reasoning": "资源批处理命令只和本机的 BUD UI Studio 工作台服务(localhost:8791)收发切图,不访问外网"
+    "reasoning": "「发送到工作台」(界面改版)和资源批处理命令只和本机的 BUD UI Studio 工作台服务(localhost:8791)收发切图,不访问外网"
   }
 }

@@ -17,6 +17,8 @@
 #   POST /api/pipeline/<动作>:只认本机工作台页面(同「覆盖到 Unity」的口令 / Origin 校验);
 #   /api/bridge/*:Figma 插件「资源批处理」命令和工作台之间的中转箱(插件把选中的切图发进来、把处理结果取回去),
 #   只认本机 + 配对码(请求头 X-BudUI-Bridge = dev/bridge_key.txt,第一次用时生成,在批处理页面上显示,插件里填一次)。
+#   POST /api/bridge/screens:界面改版插件「发送到工作台」(配对码,整包存 exports/bridge_screens/ 留最近 5 个,上限 200MB);
+#   GET /api/figma-inbox、GET /api/figma-inbox/<id>、POST /api/figma-inbox/<id>/done:工作台收件(只认本机工作台页面,口令 / Origin 同 /api/unity/*)。
 import base64, datetime, glob, http.server, json, os, re, secrets, shutil, socket, sys, urllib.parse
 
 # pythonw 启动(桌面应用在后台无窗口起服务)时没有控制台,stdout/stderr 是 None:请求日志一写就抛异常、连接被掐断
@@ -421,6 +423,59 @@ def unity_apply(root, req):
     return done
 
 
+# ---------------- Figma 插件 → 工作台:界面改版的「发送到工作台」收件箱 ----------------
+SCREENS_DIR = os.path.join(EXPORTS, "bridge_screens")
+SCREENS_KEEP = 5
+SCREENS_MAX = 200 * 1024 * 1024   # 只对 /api/bridge/screens 放宽到 200MB(整包含全部切图的 base64)
+SCREENS_ID_RE = re.compile(r"^\d{8}-\d{9}$")
+
+
+def screens_store(raw):
+    """把插件包原样存成 exports/bridge_screens/<时间戳>.budfig.json(旁边一个 .meta.json 放列表用的摘要),只留最近 5 个"""
+    pkg = json.loads(raw)
+    if not isinstance(pkg, dict) or pkg.get("format") != "bud-ui-studio/figma-export" or not isinstance(pkg.get("screens"), list):
+        raise ValueError("不是 BUD UI Studio 插件导出包(format 应为 bud-ui-studio/figma-export)")
+    names = [str((s.get("frame") or {}).get("name") or "") for s in pkg["screens"] if isinstance(s, dict)]
+    os.makedirs(SCREENS_DIR, exist_ok=True)
+    now = datetime.datetime.now()
+    sid = now.strftime("%Y%m%d-%H%M%S") + f"{now.microsecond // 1000:03d}"
+    with open(os.path.join(SCREENS_DIR, sid + ".budfig.json"), "wb") as f:
+        f.write(raw)
+    with open(os.path.join(SCREENS_DIR, sid + ".meta.json"), "w", encoding="utf-8") as f:
+        json.dump({"id": sid, "file": str(pkg.get("fileName") or ""), "screens": names, "time": now.isoformat(timespec="seconds"), "size": len(raw)}, f, ensure_ascii=False)
+    for old in sorted(glob.glob(os.path.join(SCREENS_DIR, "*.budfig.json")))[:-SCREENS_KEEP]:
+        base = old[:-len(".budfig.json")]
+        for ext in (".budfig.json", ".meta.json", ".done"):
+            try:
+                os.remove(base + ext)
+            except OSError:
+                pass
+    return {"ok": True, "id": sid, "screens": len(names)}
+
+
+def screens_list():
+    items = []
+    for p in sorted(glob.glob(os.path.join(SCREENS_DIR, "*.meta.json")), reverse=True):
+        base = p[:-len(".meta.json")]
+        if os.path.exists(base + ".done") or not os.path.isfile(base + ".budfig.json"):
+            continue
+        try:
+            with open(p, encoding="utf-8") as f:
+                items.append(json.load(f))
+        except (OSError, ValueError):
+            pass
+    return items
+
+
+def screens_path(sid):
+    if not SCREENS_ID_RE.match(sid or ""):
+        raise ValueError("收件箱编号不对")
+    p = os.path.join(SCREENS_DIR, sid + ".budfig.json")
+    if not os.path.isfile(p):
+        raise FileNotFoundError("收件箱里没有这个包(可能已被新的包顶掉,让插件重新发送)")
+    return p
+
+
 class Handler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=ROOT, **kwargs)
@@ -436,6 +491,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         if self.path.startswith("/api/bridge/"):
             return self.do_bridge("GET")
+        if urllib.parse.urlparse(self.path).path.startswith("/api/figma-inbox"):
+            return self.do_figma_inbox("GET")
         if urllib.parse.urlparse(self.path).path == "/api/projects":   # 工作台「从共享文件夹载入」:列出 projects/ 里的工程文件
             items = [{"name": os.path.basename(f), "bytes": os.path.getsize(f), "mtime": int(os.path.getmtime(f) * 1000)}
                      for f in glob.glob(os.path.join(PROJECTS, "*.budui.json"))]
@@ -528,12 +585,46 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 return self.reply(200, {"ok": True, "name": "BUD UI Studio"})
             if method == "GET" and path == "/api/bridge/outbox":
                 return self.reply(200, {"items": pc.bridge_outbox()})
-            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}") if method == "POST" else {}
+            if method == "POST" and path == "/api/bridge/screens":   # 界面改版插件包:原样存盘,不解析切图
+                n = int(self.headers.get("Content-Length", 0))
+                if n > SCREENS_MAX:
+                    return self.reply(413, {"error": f"包太大({n // 1048576} MB,上限 {SCREENS_MAX // 1048576} MB):少选几个界面分批发送"})
+                return self.reply(200, screens_store(self.rfile.read(n)))
+            body =json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}") if method == "POST" else {}
             if method == "POST" and path == "/api/bridge/inbox":
                 return self.reply(200, pc.bridge_inbox_add(body))
             if method == "POST" and path == "/api/bridge/outbox/done":
                 return self.reply(200, pc.bridge_outbox_done(body.get("job", "")))
         except (ValueError, KeyError, OSError) as e:
+            return self.reply(400, {"error": str(e)})
+        return self.reply(404)
+
+    def do_figma_inbox(self, method):
+        """工作台取插件发来的界面包:只认本机工作台页面(同 /api/unity/*)"""
+        if not self.is_local():
+            return self.reply(403, {"error": "收件箱只给本机工作台用"})
+        if not self.trusted():
+            return self.reply(403, {"error": "只接受本机工作台页面的请求(直接打开的工作台要先刷新页面拿到本次服务的口令)"})
+        parts = urllib.parse.urlparse(self.path).path[len("/api/figma-inbox"):].strip("/").split("/")
+        try:
+            if method == "GET" and parts == [""]:
+                return self.reply(200, {"items": screens_list()})
+            if method == "GET" and len(parts) == 1:
+                with open(screens_path(parts[0]), "rb") as f:
+                    raw = f.read()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+                return
+            if method == "POST" and len(parts) == 2 and parts[1] == "done":
+                p = screens_path(parts[0])
+                open(p[:-len(".budfig.json")] + ".done", "w").close()
+                return self.reply(200, {"ok": True})
+        except FileNotFoundError as e:
+            return self.reply(404, {"error": str(e)})
+        except (ValueError, OSError) as e:
             return self.reply(400, {"error": str(e)})
         return self.reply(404)
 
@@ -582,6 +673,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self.do_pipeline(url.path[len("/api/pipeline/"):])
         if not self.is_local():   # 局域网共享时:写主工程、写文件夹的接口只给主机自己用
             return self.reply(403, {"error": "局域网打开的工作台不能用这个功能:覆盖到 Unity、写回工程只能在共享工作台的那台电脑上操作。可以「导出交付包」或「保存工程」发给对方。"})
+        if url.path.startswith("/api/figma-inbox/"):
+            return self.do_figma_inbox("POST")
         if url.path in ("/api/unity/search", "/api/unity/match", "/api/unity/scan", "/api/unity/apply", "/api/unity/sprites", "/api/unity/file"):
             return self.do_unity(url.path)
         name = urllib.parse.parse_qs(url.query).get("name", [""])[0]

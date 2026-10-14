@@ -186,12 +186,19 @@ if (figma.command === "import") {
       doExport(msg.ids).catch(function (e) {
         figma.ui.postMessage({ type: "error", text: String((e && e.message) || e) });
       });
+    } else if (msg.type === "saveCfg") {   // 「发送到工作台」的连接设置,与资源批处理(batch)共用 budui_bridge
+      if (figma.clientStorage) figma.clientStorage.setAsync("budui_bridge", msg.cfg);
     } else if (msg.type === "close") {
       figma.closePlugin();
     }
   };
   figma.on("selectionchange", sendSelection);
   sendSelection();
+  if (figma.clientStorage) {
+    figma.clientStorage.getAsync("budui_bridge").then(function (cfg) {
+      figma.ui.postMessage({ type: "init", cfg: cfg || {}, file: figma.root.name });
+    });
+  }
 }
 
 // ================= 导入:把工作台工程(.budui.json)还原成 Figma 图层 =================
