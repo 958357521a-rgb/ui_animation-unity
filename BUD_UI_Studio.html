@@ -389,6 +389,17 @@ function renderStage(){
   stage.style.transform = `translate(${panX}px,${panY}px) scale(${zoom})`;
   $("#zoomInfo").textContent = `缩放 ${(zoom*100)|0}%`;
   elById = {};
+  // 互相「切换到」的两个状态层(如交互组件 金额=隐藏 / 金额=显示):编辑时不叠着显示——
+  // 平时只显示默认那层;选中初始隐藏的那层(或它里面的节点)时只显示它、藏起另一层
+  const stateHide = new Set(), stateEdit = new Set();
+  const within = (n, id) => n.id === id || (n.children || []).some(c => within(c, id));
+  walkAll(n => {
+    if (!n.hiddenByDefault || n.clickAction !== "swap" || !n.clickTarget) return;
+    const partner = findNodeAll(n.clickTarget);
+    if (!partner || partner.clickAction !== "swap" || partner.clickTarget !== n.id) return;
+    if (selId && within(n, selId)) { stateEdit.add(n.id); stateHide.add(partner.id); }
+    else stateHide.add(n.id);
+  });
   const make = (n, parentEl, px, py)=>{
     const el = document.createElement("div");
     el.className = "node" + (n.id===selId?" sel":"") + (n.type==="button"?" btnNode":"") + (n.motion!=="none"?` m-${n.motion}`:"") + (isKeepOld(n)?" keepOld":"");
@@ -404,7 +415,8 @@ function renderStage(){
     if (n.type==="container" && n.id!==selId) el.style.outline = "1px dashed #5a5a6a";
     if (n.clip || n.scroll) el.style.overflow = "hidden";
     if (n.clickable) el.style.cursor = "pointer";
-    if (n.hiddenByDefault && !playing) el.style.opacity = "0.4";
+    if (n.hiddenByDefault && !playing && !stateEdit.has(n.id)) el.style.opacity = "0.4";
+    if (!playing && stateHide.has(n.id)) el.style.display = "none";
     if (n.type==="text" || (n.type==="button" && n.label)){
       const t = document.createElement("div"); t.className = "txt";
       const isBtn = n.type==="button";
