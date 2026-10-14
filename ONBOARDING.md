@@ -6,7 +6,7 @@
 
 ## 给同事本人:开始用
 
-1. **拿到工作台**:原作者在 GitHub 上把私有仓库共享给你(邮件里点接受邀请)。装 [GitHub Desktop](https://desktop.github.com/),登录后 File → Clone repository 选这个仓库,放到任意位置(路径里有中文也没关系)。也可以用命令行 `git clone <仓库地址>`。
+1. **拿到工作台**:原作者在 GitHub 上把私有仓库共享给你(邮件里点接受邀请)。装 [GitHub Desktop](https://desktop.github.com/),登录后 File → Clone repository 选这个仓库,放到任意位置(路径里有中文也没关系)。也可以用命令行 `git clone <仓库地址>`。**不要把仓库覆盖进已有的旧文件夹**(比如以前拷来的非 git 版本):先备份旧文件夹,克隆到新目录,再把旧的 `projects/` 复制过去。Claude Code 的会话跟着打开时的目录走,换目录后要在新目录重新打开会话。
 2. **双击文件夹里的「安装与自检.bat」**:逐项检查 Python、Pillow、Node.js、浏览器、工作台服务、AI 重绘、Unity,缺什么照提示补(缺 Pillow 会自动装)。没装 Python 时它会告诉你怎么装,装好再双击一次。
 3. **工程数据**:仓库里不带工程文件(几十 MB,含游戏美术资源)。新需求直接在工作台「＋ 新建任务」;要接着做原作者的任务,向原作者要工程文件(`.budui.json`,或任务首页「导出全部任务」得到的文件),放进 `projects/` 后点「载入工程」,或在任务首页「从工程文件导入」。
 4. **AI 重绘(可选)**:对 Claude 说「按 ONBOARDING.md 第 7 节,按我电脑的配置把 AI 重绘环境装好」。它会先查你的显卡、显存、内存、硬盘,挑最合适的模型版本,下载前告诉你要下多大的文件,你同意了才下;装好后试跑一张给你看效果和用时。
@@ -48,7 +48,7 @@ Figma 设计稿 ──导入──▶ 工作台还原图层(文字可编辑,其�
 
 | 需要 | 用途 | 怎么确认 |
 |---|---|---|
-| Python 3 | 本地服务 `dev/studio_server.py`:托管工作台,并能把工程写回 `projects/` | `python --version`。不认 `python` 就试 `py -3`(Windows)或 `python3`(macOS),并把 `.claude/launch.json` 里**两个配置**的命令都改掉:用 `python3` 就把 `runtimeExecutable` 改成 `"python3"`;用 `py -3` 要拆开写,`runtimeExecutable` 写 `"py"`,`runtimeArgs` 开头加一项 `"-3"` |
+| Python 3 | 本地服务 `dev/studio_server.py`:托管工作台,并能把工程写回 `projects/` | `python --version`。不认 `python` 就试 `py -3`(Windows)或 `python3`(macOS),并把 `.claude/launch.json` 里**两个配置**的命令都改掉:用 `python3` 就把 `runtimeExecutable` 改成 `"python3"`;用 `py -3` 要拆开写,`runtimeExecutable` 写 `"py"`,`runtimeArgs` 开头加一项 `"-3"`。只有 WindowsApps 占位程序、没装真 Python 时:`winget install --id Python.Python.3.12 -e --scope user`,装完新开终端(或重读 PATH)再 `pip install Pillow` |
 | Chrome 或 Edge | 运行工作台 | — |
 | Node.js 20.15+(可选) | 改代码后的自检:`dev/offline_check.js` 要 18+,`dev/plugin_selftest.js` 要 20.15+ / 22.2+ | `node --version` |
 | 思源黑体(可选) | 只影响画布预览:没装会用微软雅黑代替,字重和 Unity 里看到的不一样;导出不受影响 | — |
@@ -101,7 +101,8 @@ Figma 设计稿 ──导入──▶ 工作台还原图层(文字可编辑,其�
 - 工具:`dev/restyle/restyle.py`(重绘切图)、`dev/restyle/prefab_sprites.py`(列出一个 prefab 用到的全部切图)、`dev/restyle/swap_in_place.py`(把新切图原路径换进主工程:默认只演练,`--apply` 才写,旧图备份到 `backups/<时间>-restyle/`,`--undo` 还原)。做法和踩坑见 `docs/经验与决定.md` 的「AI 重绘」。
 - 这一步由 Claude 按这台电脑的配置来搭,工作台本身不带模型。需要的东西:
   1. **ComfyUI 0.37 或更新**(要有 Qwen Image 2.1 的节点 `TextEncodeQwenImage21`、`QwenImage21Cache`):Windows 便携版在 https://github.com/comfyanonymous/ComfyUI/releases(选 NVIDIA 版),解压到工作台文件夹以外的地方。端口用 8188,保持默认只听本机(**不要**加 `--listen 0.0.0.0` 开到局域网)。
-  2. **三类模型**,官方来源 https://huggingface.co/Comfy-Org/Qwen-Image-2.1 ,国内网络用 https://modelscope.cn/models/Comfy-Org/Qwen-Image-2.1 (同名仓库,文件一样):主模型放 `ComfyUI/models/diffusion_models/`(`qwen_image_2.1_bf16` 或 `qwen_image_2.1_int8_convrot`)、文本编码放 `text_encoders/`(`qwen3vl_8b_bf16` 或 `qwen3vl_8b_int8_convrot`)、VAE 放 `vae/`(`qwen_image_2.1_vae_bf16`)。原作者用的是 int8 主模型 + int8 文本编码(约 16 GB)。
+     便携版是 `.7z`(LZMA),Windows 自带的 tar 解不开:从 https://www.7-zip.org/a/7zr.exe 下单文件解压工具,`7zr.exe x 包.7z -o目标目录`。
+  2. **三类模型**,官方来源 https://huggingface.co/Comfy-Org/Qwen-Image-2.1 ,国内网络用 https://modelscope.cn/models/Comfy-Org/Qwen-Image-2.1 (同名仓库,文件一样):主模型放 `ComfyUI/models/diffusion_models/`(`qwen_image_2.1_bf16` 或 `qwen_image_2.1_int8_convrot`)、文本编码放 `text_encoders/`(`qwen3vl_8b_bf16` 或 `qwen3vl_8b_int8_convrot`)、VAE 放 `vae/`(`qwen_image_2.1_vae_bf16`)。原作者用的是 int8 主模型 + int8 文本编码(约 16 GB)。几个 GB 的文件用 `curl.exe -L -C - --retry 10 -o 文件 地址` 下载,断了能续传;别指望 Claude 会话里的后台下载,会话一结束就断。
 - **先查配置再选**:`nvidia-smi`(显卡、显存、驱动版本)、内存、磁盘剩余空间(留 25 GB 以上)。
 
   | 显存 | 建议 |

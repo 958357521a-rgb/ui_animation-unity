@@ -20,3 +20,6 @@ desktop.ini
 # Figma 插件配对码、资源批处理的本机设置(主工程路径)
 dev/bridge_key.txt
 dev/pipeline/settings.local.json
+
+# 其他会话的原始记录归档(含完整对话,只留本机)
+docs/会话归档/
