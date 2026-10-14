@@ -520,7 +520,7 @@ function toggleLock(){ proj.layoutLocked = !isLocked(); renderLockBtn(); autosav
 function restoreNodeLayout(){ const n = findNode(selId); if (!n || !n.figma) return; pushHistory(); Object.assign(n, n.figma); renderAll(); autosave(); toast("已还原该节点的 Figma 位置"); }
 function applyFigmaRects(items, nodes){ // 按图层顺序与名称把规划结果对应回现有节点
   let moved = 0; const used = new Set();
-  const kindOk = (n, it) => it.kind === "text" ? n.type === "text" : it.kind === "container" ? n.type === "container" : (n.type === "image" || n.type === "button");
+  const kindOk = (n, it) => it.kind === "text" ? n.type === "text" : it.kind === "container" || it.kind === "variants" ? n.type === "container" : (n.type === "image" || n.type === "button");
   for (const it of items){
     const n = nodes.find(m => !used.has(m) && m.name === it.src.name.slice(0, 32) && kindOk(m, it)); if (!n) continue;
     used.add(n);
@@ -948,6 +948,8 @@ const POPUP_LAYER = /^(modal|dialog|popup)\b|^(modal|dialog|popup)\/|弹窗|遮�
 function isPopupFrame(frame){ return (frame.children || []).some(c => c.visible !== false && POPUP_LAYER.test(c.name)); }
 // 规划一个界面:哪些图层保留为文字/分组、哪些渲染成切图(与 figma-plugin/code.js 的 planRenderIds 规则一致)
 // 注意:插件额外导出「含文字容器自身的底图」#bg(images["<节点id>#bg"] + 节点字段 bgRenderBounds,切图集合不变),REST 路径没有;有的话容器最前面多一个「/底」image 子节点
+// 插件额外导出交互组件 CHANGE_TO 目标变体 variantStates([{name, current, tree}],tree 是目标变体的临时实例子树,切图以其节点 id 为键并入 images),REST 路径没有;
+// 带它的节点还原为外层容器 + 当前状态 A + 目标状态 B(规则见 withVariants;PLUGIN_RULES 不变,普通切图集合不变)
 function planScreen(frame, kind){
   const fb = frame.absoluteBoundingBox;
   const scale = STAGE_W / fb.width; // 宽度对齐 2436,与主工程 CanvasScaler 一致
@@ -957,23 +959,33 @@ function planScreen(frame, kind){
   const liveText = t => { const fam = (t.style && t.style.fontFamily) || ""; const fills = (t.fills||[]).filter(visible);
     return /source han sans|思源黑|noto sans (sc|cjk)|noto sans s chinese|montserrat|pingfang|苹方|microsoft yahei|微软雅黑/i.test(fam)
       && fills.every(f => f.type === "SOLID") && !(t.effects||[]).some(visible) && !(t.strokes||[]).some(visible); };
-  const renderIds = [], bgIds = []; const stats = {text:0, container:0, scroll:0};
+  const renderIds = [], bgIds = []; const stats = {text:0, container:0, scroll:0, variants:0, variantExtra:0};
+  // 交互组件:节点带 variantStates 时包成 {kind:"variants", rect: 原节点, states:[当前状态 A, 目标状态 B]};多于两个状态只接第一个目标(stats.variantExtra 记多出的个数)
+  const withVariants = (c, item, outer) => {
+    const vs = (c.variantStates || []).filter(v => v && v.tree && v.tree.visible !== false && v.tree.absoluteBoundingBox);
+    if (!vs.length) return item;
+    const sub = plan({children: [vs[0].tree]}, vs[0].tree.absoluteBoundingBox, 0);   // 目标变体按同样规则规划,坐标相对它自己(与原实例同位同尺寸)
+    if (!sub.length) return item;
+    stats.variants++; stats.variantExtra += vs.length - 1;
+    const a = Object.assign({}, item, {rect: {x: item.rect.x - outer.x, y: item.rect.y - outer.y, w: item.rect.w, h: item.rect.h}});
+    return {kind: "variants", src: c, rect: outer, states: [{name: c.name + "/" + (vs[0].current || "当前"), item: a}, {name: c.name + "/" + (vs[0].name || "目标"), item: sub[0]}]};
+  };
   const plan = (node, origin, depth) => {
     const out = [];
     for (const c of (node.children||[])){
       if (!visible(c) || !c.absoluteBoundingBox) continue;
       const box = c.absoluteBoundingBox;
       const rel = b => ({x: Math.round((b.x - origin.x) * scale), y: Math.round((b.y - origin.y) * scale), w: Math.max(1, Math.round(b.width * scale)), h: Math.max(1, Math.round(b.height * scale))});
-      if (c.type === "TEXT" && liveText(c)){ out.push({kind:"text", src:c, rect:rel(box)}); stats.text++; continue; }
+      if (c.type === "TEXT" && liveText(c)){ out.push(withVariants(c, {kind:"text", src:c, rect:rel(box)}, rel(box))); stats.text++; continue; }
       if (c.children && c.children.length && hasText(c) && depth < 8){
         const item = {kind:"container", src:c, rect:rel(box), children:plan(c, box, depth + 1)};
         if (c.bgRenderBounds){ const b = c.bgRenderBounds; item.bg = {id: c.id + "#bg", rect: {x: Math.round((b.x - box.x) * scale), y: Math.round((b.y - box.y) * scale), w: Math.max(1, Math.round(b.width * scale)), h: Math.max(1, Math.round(b.height * scale))}}; bgIds.push(item.bg.id); }
         const wide = item.children.find(k => k.kind === "container" && (k.rect.w > item.rect.w + 4 || k.rect.h > item.rect.h + 4));
         if (c.clipsContent && wide){ item.scroll = wide.rect.w > item.rect.w + 4 ? "h" : "v"; item.scrollContent = wide; stats.scroll++; }
         else if (c.clipsContent) item.clip = true;
-        out.push(item); stats.container++; continue;
+        out.push(withVariants(c, item, rel(box))); stats.container++; continue;
       }
-      out.push({kind:"image", src:c, rect:rel(c.absoluteRenderBounds || box)}); renderIds.push(c.id);
+      out.push(withVariants(c, {kind:"image", src:c, rect:rel(c.absoluteRenderBounds || box)}, rel(box))); renderIds.push(c.id);
     }
     return out;
   };
@@ -1012,6 +1024,18 @@ async function buildScreenFromFigma(frame, render, say, opts = {}){
       n.alpha = r4((fill && fill.opacity != null ? fill.opacity : 1) * (c.opacity != null ? c.opacity : 1));
       return n;
     }
+    if (item.kind === "variants"){   // 交互组件:外层容器 = 原实例;A = 当前状态(点击显示 B);B = 目标状态(默认隐藏,点击收起自己)。交互带 protoLink 标记,autoConfigure/resetAuto 不动
+      const n = addNode("container", parent, true); Object.assign(n, item.rect); n.figma = Object.assign({}, item.rect); n.name = c.name.slice(0, 32);
+      const [a, b] = item.states.map(s => { const k = make(s.item, n); if (k) k.name = s.name.slice(0, 48); return k; });
+      if (a && b){
+        const used = new Set(); walkAll(x => { if (x.key) used.add(x.key); });
+        const uniqKey = k0 => { let k = k0, i = 2; while (used.has(k)) k = k0 + (i++); used.add(k); return k; };
+        const base = camelKey(c.name) || "state";
+        a.clickable = true; a.protoLink = true; a.key = uniqKey(base + "Swap"); a.clickAction = "show"; a.clickTarget = b.id;
+        b.hiddenByDefault = true; b.clickable = true; b.protoLink = true; b.key = uniqKey(base + "Restore"); b.clickAction = "hide"; b.clickTarget = b.id;
+      }
+      return n;
+    }
     if (item.kind === "container"){
       const n = addNode("container", parent, true); Object.assign(n, item.rect); n.figma = Object.assign({}, item.rect); n.name = c.name.slice(0, 32);
       if (item.scroll) n.scroll = item.scroll; if (item.clip) n.clip = true;
@@ -1039,10 +1063,10 @@ async function buildScreenFromFigma(frame, render, say, opts = {}){
   const mod = $("#moduleName");
   if (!mod.value || mod.value === "Unity") mod.value = guessModuleName(frame.name);
   autoConfigure(true);
-  const result = {name: frame.name, text: stats.text, images: Object.keys(rendered).length, missing};
+  const result = {name: frame.name, text: stats.text, images: Object.keys(rendered).length, missing, variants: stats.variants, variantExtra: stats.variantExtra};
   if (opts.silent) return result;
   selId = null; renderAll(); fitStage(); autosave();
-  toast(`已还原「${frame.name}」:${stats.text} 个文本 + ${Object.keys(rendered).length} 张切图${missing ? `(${missing} 张缺失已跳过)` : ""},已按图层角色自动配好动效和交互`, 7000);
+  toast(`已还原「${frame.name}」:${stats.text} 个文本 + ${Object.keys(rendered).length} 张切图${missing ? `(${missing} 张缺失已跳过)` : ""},已按图层角色自动配好动效和交互${stats.variants ? `;${stats.variants} 个交互组件保留了两种状态和点击切换(Figma 原型)${stats.variantExtra ? `,另有 ${stats.variantExtra} 个目标状态暂未导入(只接第一个)` : ""}` : ""}`, 7000);
   return result;
 }
 
@@ -1150,10 +1174,12 @@ function progDialog(title){
 function importReport(r, mode){
   const pages = r.results.filter(x => x.kind === "page").length, pops = r.results.length - pages;
   const imgs = r.results.reduce((a, x) => a + x.images, 0), miss = r.results.reduce((a, x) => a + x.missing, 0);
+  const vars = r.results.reduce((a, x) => a + (x.variants || 0), 0), varExtra = r.results.reduce((a, x) => a + (x.variantExtra || 0), 0);
   showMsg(mode === "new" ? "模块已导入" : "页面已加入",
     (mode === "new" ? `已导入 ${r.results.length} 个界面:` + ["主页", kindSplit(pages - 1, pops)].filter(Boolean).join(" + ") : `已加入 ${r.results.length} 个界面:${kindSplit(pages, pops)}`)
     + `,共 ${imgs} 张切图${miss ? `(${miss} 张缺失已跳过)` : ""}。<br>每页已按图层角色配好进场动效和点击交互;自动连好 ${r.links.length} 条跳转:`
     + `<div style="max-height:30vh;overflow:auto;margin:4px 0 8px;color:var(--dim)">${r.links.map(l => "· " + escHtml(l)).join("<br>") || "(没有识别到可自动连接的跳转)"}</div>`
+    + (vars ? `<br>${vars} 个交互组件(Figma 原型的点击切换)已还原为「当前状态 + 目标状态」两个子节点,点当前状态显示目标状态、点目标状态收起${varExtra ? `;另有 ${varExtra} 个目标状态(组件有多于两个状态)暂未导入,只接了第一个` : ""}。` : "")
     + `点「▶ 试玩」从主页开始点卡片测试;跳转目标可在属性面板「点击后」修改。`);
 }
 // 导入流程:读结构(loadFrames)→ 渲染切图(render)→ 建页面、配动效交互、连跳转 → 汇报
@@ -1325,10 +1351,12 @@ function autoInteract(){
   const uniqRaw = k0 => { let k = k0, i = 2; while (used.has(k)) k = k0 + (i++); used.add(k); return k; };
   const uniq = base => uniqRaw(prefix ? prefix + pascal(base || "item") : (base || "item"));
   const markTexts = (node, pre) => node.children.forEach(ch => { if (ch.type === "text"){ ch.dynamic = true; ch.key = uniqRaw(pre + pascal(camelKey(ch.name) || "text")); } else markTexts(ch, pre); });
+  walk(n => { if (n.protoLink && n.key) used.add(n.key); });   // Figma 原型带来的交互标识先占住,别被自动识别的撞上
   const parentOf = new Map(); walk((n, d, p) => parentOf.set(n.id, p));
   const underClickable = n => { for (let p = parentOf.get(n.id); p; p = parentOf.get(p.id)) if (p.clickable || p.type === "button") return true; return false; };
   walk((n, depth, parent) => {
     const nm = n.name || "";
+    if (n.protoLink) return;
     if (n.type === "button"){ used.add(n.key); return; }
     // 金额/档位等含数字的文字标为动态文本(即使位于可点击分组里)
     if (n.type === "text" && !n.dynamic && /\d/.test(n.text || "") && /amount|tier|count|price|progress|time|金额|数量|价格|时间|剩余|累计|档位/i.test(nm)){ n.dynamic = true; n.key = uniq(camelKey(nm) || "value"); }
@@ -1377,7 +1405,8 @@ function autoMotion(){
   }
 }
 // 清掉自动识别写上的交互标记(按钮组件本身、初始隐藏等手动设置不动)
-function resetAuto(nodes){ walk(n => { if (n.type !== "button"){ n.clickable = false; n.isClose = false; } if (n.type === "text") n.dynamic = false; delete n.clickMotion; delete n.clickAction; delete n.clickTarget; delete n.clickTargetPage; }, nodes); }
+// protoLink = Figma 原型带来的交互(交互组件的状态切换),不是自动识别配的,复位和重配都不动
+function resetAuto(nodes){ walk(n => { if (n.protoLink) return; if (n.type !== "button"){ n.clickable = false; n.isClose = false; } if (n.type === "text") n.dynamic = false; delete n.clickMotion; delete n.clickAction; delete n.clickTarget; delete n.clickTargetPage; }, nodes); }
 /* 一键配动效与交互。按钮:整个模块所有页面一起重配——先全部复位,再按页面顺序逐页识别(标识与整体导入时一致),最后重新连好页面跳转;
    silent(导入时):只配刚建好的当前页,某页切图全缺失时也不弹窗打断 */
 function autoConfigure(silent){

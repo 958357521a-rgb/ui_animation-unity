@@ -56,6 +56,48 @@ function text(name, x, y, w, h, chars, size, weight, opt = {}) {
   return n;
 }
 
+// ---- 交互组件桩:COMPONENT_SET(两个变体)+ createInstance / getMainComponentAsync / getNodeByIdAsync / reactions ----
+// 临时实例:对目标变体子树深拷贝,根的 x/y 一变,所有后代跟着平移(与 Figma 里顶层节点 x/y = 绝对坐标一致);记在 liveInstances,remove() 后移除
+const liveInstances = new Set(), nodeTable = {};
+function shiftTree(n, dx, dy) { n._ab.x += dx; n._ab.y += dy; (n.children || []).forEach(c => shiftTree(c, dx, dy)); }
+function copyAsInstance(src, root) {
+  const ab = Object.assign({}, src.absoluteBoundingBox);
+  const c = Object.assign({}, src, { id: "I" + src.id.replace(/:/g, "_") + "-tmp" + seq++, _ab: ab, type: root ? "INSTANCE" : src.type });
+  delete c.reactions;
+  Object.defineProperty(c, "absoluteBoundingBox", { get() { return c._ab; }, enumerable: true });
+  Object.defineProperty(c, "absoluteRenderBounds", { get() { const m = (c.effects || []).length ? 20 : 0; return { x: c._ab.x - m, y: c._ab.y - m, width: c._ab.width + 2 * m, height: c._ab.height + 2 * m }; }, enumerable: true });
+  c.children = (src.children || []).map(ch => copyAsInstance(ch, false));
+  c.exportAsync = async () => { exported.push(c.name); return png(src._color || "#999999"); };
+  c.clone = () => makeClone(c, src._color || "#999999");
+  if (root) {
+    Object.defineProperty(c, "x", { get() { return c._ab.x; }, set(v) { shiftTree(c, v - c._ab.x, 0); }, enumerable: true });
+    Object.defineProperty(c, "y", { get() { return c._ab.y; }, set(v) { shiftTree(c, 0, v - c._ab.y); }, enumerable: true });
+    c.resize = (w, h) => { c._ab.width = w; c._ab.height = h; };
+    c.remove = () => { liveInstances.delete(c); const i = pageChildren.indexOf(c); if (i >= 0) pageChildren.splice(i, 1); };
+    c.detachInstance = () => { throw new Error("临时实例不应被 detach"); };
+    liveInstances.add(c);
+  }
+  return c;
+}
+// 组件集 Reuse/充值金额显隐(放在 99 共享组件表里,不在导出范围):「金额=隐藏」(旧 API reactions[].action)和「金额=显示」(反向切回)
+const VX = 0, VY = 5200;
+function variantComp(name, label, color) {
+  const comp = node("COMPONENT", name, VX, VY, 610, 96, { fills: solid("#ffffff"), effects: [{ type: "DROP_SHADOW", visible: true }] }, [
+    node("FRAME", "金额可见性", VX + 27, VY + 20, 52, 52, { color }, [node("VECTOR", "eye-" + name, VX + 27, VY + 20, 52, 52, { color })]),
+    text("amount-lib", VX + 97, VY + 30, 319, 41, label, 30, 500)
+  ]);
+  comp._color = color; comp.createInstance = () => copyAsInstance(comp, true);
+  return comp;
+}
+const compHidden = variantComp("金额=隐藏", "当前充值金额：*** 元", "#cccccc"), compShown = variantComp("金额=显示", "当前充值金额：98 元", "#ffd84a");
+const compSet = node("COMPONENT_SET", "Reuse/充值金额显隐 · 原充值组件", VX, VY, 1300, 96, {}, [compHidden, compShown]);
+compSet.children.forEach(c => { c.parent = compSet; nodeTable[c.id] = c; });
+compHidden.reactions = [{ trigger: { type: "ON_CLICK" }, action: { type: "NODE", navigation: "CHANGE_TO", destinationId: compShown.id } }];          // 旧 API:单个 action
+compShown.reactions = [{ trigger: { type: "ON_CLICK" }, actions: [{ type: "NODE", navigation: "CHANGE_TO", destinationId: compHidden.id }] }];   // 新 API:actions 数组
+// 另一个组件集的变体(不同组):Summary/AmountVisibility 引用跨组的目标,应被忽略
+const otherSet = node("COMPONENT_SET", "Other/集合", 0, 6000, 100, 100, {}, [node("COMPONENT", "x=1", 0, 6000, 100, 100), node("COMPONENT", "x=2", 0, 6000, 100, 100)]);
+otherSet.children.forEach(c => { c.parent = otherSet; nodeTable[c.id] = c; });
+
 // 界面 05 放在总览画板 (2600, 300);结构照搬真实稿子「05 · 充值福利 / 奖励总览」
 const X = 2600, Y = 300;
 const cards = ["hair", "dress", "shoe", "coin", "bench", "action", "effect", "wing"].map((k, i) => {
@@ -108,6 +150,24 @@ const screen05 = node("FRAME", "05 · 充值福利 / 奖励总览", X, Y, 2436, 
   text("hidden-debug", X, Y, 100, 20, "不应导出", 20, 400)
 ]);
 screen05.children[screen05.children.length - 1].visible = false;
+const findNode = (n, name) => { if (n.name === name) return n; for (const c of n.children || []) { const r = findNode(c, name); if (r) return r; } return null; };
+{   // Amount/RechargeLibrary:主组件 = 「金额=隐藏」,实例自身有 ON_CLICK → CHANGE_TO「金额=显示」(新 API actions 数组);「金额=隐藏」上还有同一目标的旧 API action(去重)
+  const lib = findNode(screen05, "Amount/RechargeLibrary");
+  lib.getMainComponentAsync = async () => compHidden;
+  lib.reactions = [{ trigger: { type: "ON_CLICK" }, actions: [{ type: "NODE", navigation: "CHANGE_TO", destinationId: compShown.id }] }];
+  // Summary/AmountVisibility:主组件在别的组件集、reaction 指向不同组的变体 → 不应产出 variantStates
+  const sum = findNode(screen05, "Summary/AmountVisibility");
+  sum.getMainComponentAsync = async () => otherSet.children[0];
+  sum.reactions = [{ trigger: { type: "ON_CLICK" }, actions: [{ type: "NODE", navigation: "CHANGE_TO", destinationId: compShown.id }] }];
+  // 04_CTA:只有跳转(NAVIGATE)的原型点击,不是 CHANGE_TO → 忽略;用同步 mainComponent 属性
+  const cta = findNode(screen05, "04_CTA");
+  const ctaSet = node("COMPONENT_SET", "CTA/状态", 0, 6200, 200, 100, {}, [node("COMPONENT", "状态=A", 0, 6200, 100, 100), node("COMPONENT", "状态=B", 100, 6200, 100, 100)]);
+  ctaSet.children.forEach(c => { c.parent = ctaSet; nodeTable[c.id] = c; c.createInstance = () => copyAsInstance(c, true); });
+  const navi = [{ trigger: { type: "ON_CLICK" }, actions: [{ type: "NODE", navigation: "NAVIGATE", destinationId: ctaSet.children[1].id }] }];
+  ctaSet.children[0].reactions = navi;
+  cta.mainComponent = ctaSet.children[0];
+  cta.reactions = navi;
+}
 const screen02 = node("FRAME", "02 · 充值到账确认中", 0, 300, 2436, 1125, { clip: true }, [
   rect("bg", 0, 300, 2436, 1125, "#6b5bd6"),
   text("title", 900, 800, 600, 60, "正在确认到账…", 44, 700, { family: "Some Display Font" })
@@ -123,6 +183,7 @@ const figma = {
   root: { name: "充值福利 xisi" },
   showUI() {}, on() {}, closePlugin() {},
   ui: { postMessage: m => messages.push(m), onmessage: null },
+  getNodeByIdAsync: async id => nodeTable[id] || null,
   base64Encode: bytes => Buffer.from(bytes).toString("base64")
 };
 vm.runInNewContext(fs.readFileSync(PLUGIN, "utf8"), { figma, __html__: "", console, Symbol, Promise, Math, JSON, Date, String, Object, Array, Error, RegExp, Number });
@@ -150,12 +211,24 @@ vm.runInNewContext(fs.readFileSync(PLUGIN, "utf8"), { figma, __html__: "", conso
   ok(!names.includes("x"), "未勾选的组件表不导出");
   const nt = (function find(n) { if (n.name === "next-tier") return n; for (const c of n.children || []) { const r = find(c); if (r) return r; } })(s05.frame);
   ok(nt && Array.isArray(nt.fills) && nt.fills[0].type === "SOLID", "混合填色文字取首字颜色,可正常序列化");
-  ok(Object.keys(s05.images).length === 43, `界面 05 切图数 = ${Object.keys(s05.images).length}(预期 43 = 41 + 金额可见性图标 + 容器底图 #bg)`);
+  ok(Object.keys(s05.images).length === 45, `界面 05 切图数 = ${Object.keys(s05.images).length}(预期 45 = 41 + 金额可见性图标 + 容器底图 #bg + 交互目标变体的图标和 #bg)`);
   const lib = (function find(n) { if (n.name === "Amount/RechargeLibrary") return n; for (const c of n.children || []) { const r = find(c); if (r) return r; } })(s05.frame);
   const bgKeys = Object.keys(s05.images).filter(k => k.endsWith("#bg"));
-  ok(lib && bgKeys.length === 1 && bgKeys[0] === lib.id + "#bg", "含文字且有白底+投影的 INSTANCE 产出 #bg 底图,其它容器(无自身外观)不产出");
+  const vs = lib && lib.variantStates, vtree = vs && vs[0] && vs[0].tree;
+  ok(lib && bgKeys.length === 2 && bgKeys.includes(lib.id + "#bg") && vtree && bgKeys.includes(vtree.id + "#bg"), "含文字且有白底+投影的 INSTANCE 产出 #bg 底图(另加交互目标变体根的 #bg),其它容器(无自身外观)不产出");
   ok(lib && lib.bgRenderBounds && lib.bgRenderBounds.x === lib.absoluteBoundingBox.x - 20 && lib.bgRenderBounds.width === lib.absoluteBoundingBox.width + 40, "bgRenderBounds 含投影外扩,序列化在该节点上");
-  ok(cloneLog.length === 1 && cloneLog[0].type === "FRAME" && cloneLog[0].children === 0 && cloneLog[0].onPage && cloneLog[0].layoutMode === "NONE" && cloneLog[0].x === lib.absoluteBoundingBox.x && cloneLog[0].y === lib.absoluteBoundingBox.y && cloneLog[0].w === 610 && cloneLog[0].h === 96, "底图出图时 clone 已脱离实例、清空子节点、在页面顶层同一绝对坐标、尺寸不变");
+  // ---- 交互组件 variantStates ----
+  const allVs = []; (function walkS(n) { if (n.variantStates) allVs.push(n); (n.children || []).forEach(walkS); })(s05.frame);
+  ok(allVs.length === 1 && allVs[0] === lib, "只有带 CHANGE_TO 的实例产出 variantStates(跨组件集的、NAVIGATE 的都不算)");
+  ok(vs && vs.length === 1 && vs[0].name === "金额=显示" && vs[0].current === "金额=隐藏", "variantStates 记录目标变体名和当前变体名;实例与变体上的 reaction 指向同一目标时去重(新旧 API 都认)");
+  ok(vtree && vtree.name === "金额=显示" && vtree.type === "INSTANCE" && JSON.stringify(vtree.absoluteBoundingBox) === JSON.stringify(lib.absoluteBoundingBox), "目标变体临时实例与原实例同绝对坐标、同尺寸");
+  const vtext = vtree && (function find(n) { if (n.type === "TEXT") return n; for (const c of n.children || []) { const r = find(c); if (r) return r; } })(vtree);
+  ok(vtext && vtext.characters === "当前充值金额：98 元" && lib.children.some(c => c.type === "TEXT" && c.characters === "充值库 128 元"), "目标变体的文字内容进了子树,原实例结构不变");
+  const vIcon = vtree && vtree.children.find(c => c.name === "金额可见性");
+  ok(vIcon && !!s05.images[vIcon.id] && vtree.bgRenderBounds && !!s05.images[vtree.id + "#bg"], "目标变体的切图(图标)与根 #bg 并入该界面 images,键是临时节点 id");
+  ok(liveInstances.size === 0, "导出结束后文档里不残留交互目标变体的临时实例");
+  ok(cloneLog.length === 2 && cloneLog[1].type === "FRAME" && cloneLog[1].children === 0 && cloneLog[1].onPage && cloneLog[1].x === lib.absoluteBoundingBox.x && cloneLog[1].y === lib.absoluteBoundingBox.y && cloneLog[1].w === 610 && cloneLog[1].h === 96, "目标变体根的 #bg 同样走 clone 流程(脱离实例、清空子节点、顶层同坐标)");
+  ok(cloneLog.length >= 1 && cloneLog[0].type === "FRAME" && cloneLog[0].children === 0 && cloneLog[0].onPage && cloneLog[0].layoutMode === "NONE" && cloneLog[0].x === lib.absoluteBoundingBox.x && cloneLog[0].y === lib.absoluteBoundingBox.y && cloneLog[0].w === 610 && cloneLog[0].h === 96, "底图出图时 clone 已脱离实例、清空子节点、在页面顶层同一绝对坐标、尺寸不变");
   ok(liveClones.size === 0 && pageChildren.length === 0, "导出结束后文档里不残留 clone");
   fs.mkdirSync(path.dirname(OUT), { recursive: true });
   fs.writeFileSync(OUT, done.json);

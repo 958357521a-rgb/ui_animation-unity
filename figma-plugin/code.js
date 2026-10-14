@@ -5,6 +5,7 @@
 // 规则版本 RULES:哪些图层保留为可编辑文字/分组、哪些渲染成切图,
 // 必须与 BUD_UI_Studio.html 里 buildScreenFromFigma 的 plan 规则完全一致;改一边就要同步改另一边并升版本号。
 // 代码刻意只用 ES2017 语法(不用 ?. ?? 和对象展开),兼容 Figma 插件沙箱。
+// 额外(不属于切图规则、不升级 RULES):插件额外导出交互组件 CHANGE_TO 目标变体 variantStates,REST 路径没有(见 variantTargets / doExport)。
 
 var RULES = "v1";
 var STAGE_W = 2436, STAGE_H = 1125;
@@ -208,6 +209,107 @@ async function exportBg(node, imgScale) {
   }
 }
 
+// 一棵序列化子树的切图 + 容器底图(#bg)导出;planRoot = 切图规划的起点(界面本身,或 {children:[变体树]}),screen = 判断祖先裁切时的顶端节点。
+// 返回 {images, skipped};切图以节点 id(底图以 "<id>#bg")为键写进 images。
+async function exportTreeImages(planRoot, tree, idMap, screen, imgScale, images, label) {
+  var res = { images: 0, skipped: 0 };
+  var renderIds = planRenderIds(planRoot);
+  for (var i = 0; i < renderIds.length; i++) {
+    progress(label + ":切图 " + (i + 1) + "/" + renderIds.length);
+    try {
+      var opts = { format: "PNG", constraint: { type: "SCALE", value: imgScale } };
+      var bytes = null;
+      if (clippedByAncestor(idMap[renderIds[i]], screen)) {
+        var sn = findSer(tree, renderIds[i]);
+        var whole = await exportUnclipped(idMap[renderIds[i]], opts);
+        if (whole) {
+          bytes = whole.bytes;
+          if (sn) sn.absoluteRenderBounds = whole.bounds;              // 位置按复制品的完整渲染范围(含超出外框的圆底、投影)
+        } else {
+          opts.useAbsoluteBounds = true;                               // 复制失败才退回按外框出图(超出外框的部分会被切掉)
+          if (sn) sn.absoluteRenderBounds = sn.absoluteBoundingBox;
+        }
+      }
+      if (!bytes) bytes = await idMap[renderIds[i]].exportAsync(opts);
+      images[renderIds[i]] = figma.base64Encode(bytes);
+      res.images++;
+    } catch (e) {
+      res.skipped++;
+    }
+  }
+  var bgIds = planBgIds(planRoot);
+  for (var j = 0; j < bgIds.length; j++) {
+    var bn = idMap[bgIds[j]];
+    if (!hasOwnLook(bn)) continue;
+    progress(label + ":容器底图 " + (j + 1) + "/" + bgIds.length);
+    try {
+      var bg = await exportBg(bn, imgScale);
+      var bs = findSer(tree, bgIds[j]);
+      if (bs && bg.bounds) { images[bgIds[j] + "#bg"] = bg.b64; bs.bgRenderBounds = bg.bounds; res.images++; }
+    } catch (e3) {
+      res.skipped++;
+    }
+  }
+  return res;
+}
+
+// ---------- 交互组件(原型点击 → 切换到同组另一个变体) ----------
+// 插件额外导出交互组件 CHANGE_TO 目标变体 variantStates(节点字段,REST 路径没有;不改变上面的切图集合,RULES 不升级)。
+// planRenderIds 的 walk 会遇到的全部节点 id(条件与 planRenderIds 相同):只有这些位置上的实例,工作台才会按交互组件还原。
+function planVisitedIds(frame) {
+  var ids = [];
+  (function walk(node, depth) {
+    (node.children || []).forEach(function (c) {
+      if (!visibleNode(c) || !c.absoluteBoundingBox) return;
+      if (c.type === "TEXT" && liveText(c)) return;
+      ids.push(c.id);
+      if (c.children && c.children.length && hasText(c) && depth < 8) walk(c, depth + 1);
+    });
+  })(frame, 0);
+  return ids;
+}
+// 实例自身(或它主组件变体)上 ON_CLICK + CHANGE_TO 指向的、与当前主组件同属一个组件集的其它变体;兼容 reactions 的 actions 数组(新)和 action(旧)。
+async function variantTargets(inst) {
+  var mc = null;
+  try { mc = inst.getMainComponentAsync ? await inst.getMainComponentAsync() : inst.mainComponent; } catch (e) { mc = null; }
+  if (!mc || !mc.parent || mc.parent.type !== "COMPONENT_SET") return null;
+  var dests = [];
+  [inst, mc].forEach(function (src) {
+    var rs = src.reactions;
+    if (!rs || rs === figma.mixed) return;
+    rs.forEach(function (r) {
+      if (!r || !r.trigger || r.trigger.type !== "ON_CLICK") return;
+      var acts = r.actions || (r.action ? [r.action] : []);
+      acts.forEach(function (a) {
+        if (a && a.type === "NODE" && a.navigation === "CHANGE_TO" && a.destinationId && a.destinationId !== mc.id && dests.indexOf(a.destinationId) < 0) dests.push(a.destinationId);
+      });
+    });
+  });
+  var targets = [];
+  for (var i = 0; i < dests.length; i++) {
+    var t = await figma.getNodeByIdAsync(dests[i]);
+    if (t && t.type === "COMPONENT" && t.parent && t.parent.id === mc.parent.id && t.id !== mc.id) targets.push(t);
+  }
+  return targets.length ? { current: mc, targets: targets } : null;
+}
+// 目标变体 → 临时实例(放到页面顶层、与原实例同绝对坐标和尺寸)→ 序列化 + 出图 → 一定删掉临时实例
+async function exportVariantState(inst, target, currentName, imgScale, images, label) {
+  var bb = inst.absoluteBoundingBox, tmp = null;
+  try {
+    tmp = target.createInstance();
+    figma.currentPage.appendChild(tmp);
+    tmp.x = bb.x; tmp.y = bb.y;
+    tmp.resize(Math.max(0.01, bb.width), Math.max(0.01, bb.height));
+    tmp.visible = true;
+    var vmap = {};
+    var vtree = ser(tmp, vmap);
+    var res = await exportTreeImages({ children: [vtree] }, vtree, vmap, tmp, imgScale, images, label);
+    return { state: { name: target.name, current: currentName, tree: vtree }, images: res.images, skipped: res.skipped };
+  } finally {
+    if (tmp) { try { tmp.remove(); } catch (e2) {} }
+  }
+}
+
 async function doExport(ids) {
   var chosen = candidates().list.filter(function (n) { return ids.indexOf(n.id) >= 0; });
   if (!chosen.length) throw new Error("没有勾选要导出的界面");
@@ -226,41 +328,26 @@ async function doExport(ids) {
     var tree = ser(screen, idMap);
     var sb = tree.absoluteBoundingBox;
     var imgScale = Math.min(4, Math.max(0.25, STAGE_W / sb.width));
-    var renderIds = planRenderIds(tree);
     var images = {};
-    for (var i = 0; i < renderIds.length; i++) {
-      progress("界面 " + (k + 1) + "/" + chosen.length + "「" + screen.name + "」:切图 " + (i + 1) + "/" + renderIds.length);
+    var label = "界面 " + (k + 1) + "/" + chosen.length + "「" + screen.name + "」";
+    var r1 = await exportTreeImages(tree, tree, idMap, screen, imgScale, images, label);
+    imageCount += r1.images; skipped += r1.skipped;
+    // 交互组件:实例点击切换到同组另一个变体,把目标变体也导出来(variantStates)
+    var visited = planVisitedIds(tree);
+    for (var v = 0; v < visited.length; v++) {
+      var inst = idMap[visited[v]];
+      if (!inst || inst.type !== "INSTANCE") continue;
       try {
-        var opts = { format: "PNG", constraint: { type: "SCALE", value: imgScale } };
-        var bytes = null;
-        if (clippedByAncestor(idMap[renderIds[i]], screen)) {
-          var sn = findSer(tree, renderIds[i]);
-          var whole = await exportUnclipped(idMap[renderIds[i]], opts);
-          if (whole) {
-            bytes = whole.bytes;
-            if (sn) sn.absoluteRenderBounds = whole.bounds;              // 位置按复制品的完整渲染范围(含超出外框的圆底、投影)
-          } else {
-            opts.useAbsoluteBounds = true;                               // 复制失败才退回按外框出图(超出外框的部分会被切掉)
-            if (sn) sn.absoluteRenderBounds = sn.absoluteBoundingBox;
-          }
+        var vt = await variantTargets(inst);
+        if (!vt) continue;
+        var states = [];
+        for (var t = 0; t < vt.targets.length; t++) {
+          var vr = await exportVariantState(inst, vt.targets[t], vt.current.name, imgScale, images, label + "·交互状态「" + vt.targets[t].name + "」");
+          states.push(vr.state); imageCount += vr.images; skipped += vr.skipped;
         }
-        if (!bytes) bytes = await idMap[renderIds[i]].exportAsync(opts);
-        images[renderIds[i]] = figma.base64Encode(bytes);
-        imageCount++;
-      } catch (e) {
-        skipped++;
-      }
-    }
-    var bgIds = planBgIds(tree);
-    for (var j = 0; j < bgIds.length; j++) {
-      var bn = idMap[bgIds[j]];
-      if (!hasOwnLook(bn)) continue;
-      progress("界面 " + (k + 1) + "/" + chosen.length + "「" + screen.name + "」:容器底图 " + (j + 1) + "/" + bgIds.length);
-      try {
-        var bg = await exportBg(bn, imgScale);
-        var bs = findSer(tree, bgIds[j]);
-        if (bs && bg.bounds) { images[bgIds[j] + "#bg"] = bg.b64; bs.bgRenderBounds = bg.bounds; imageCount++; }
-      } catch (e3) {
+        var ser0 = findSer(tree, inst.id);
+        if (ser0 && states.length) ser0.variantStates = states;
+      } catch (e4) {
         skipped++;
       }
     }
