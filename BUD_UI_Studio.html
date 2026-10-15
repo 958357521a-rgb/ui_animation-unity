@@ -1842,12 +1842,24 @@ function buildRadioTabs(nodes){
   const bgOf = t => { let best = null, bx = 0, by = 0; const rec = (l, ox, oy) => l.forEach(m => { const ax = ox + m.x, ay = oy + m.y; if (m.type === "image" && m.spriteId && (!best || m.w * m.h > best.w * best.h)){ best = m; bx = ax; by = ay; } rec(m.children, ax, ay); }); rec(t.children, 0, 0); return best ? {m: best, x: bx, y: by} : null; };
   const texts = t => { const out = []; walk(m => { if (m.type === "text") out.push(m); }, t.children); return out; };
   const reid = m => { m.id = newId(); m.children.forEach(reid); return m; };
-  const copyAs = (t, bgSrc, txtSrc) => {   // 复制 t 的内容,底图换成 bgSrc 的,文字样式取 txtSrc 同序号的
+  const imgs = t => { const out = []; const rec = (l, par) => l.forEach(m => { if (m.type === "image") out.push({m, par}); rec(m.children, m); }); rec(t.children, null); return out; };
+  // 复制 t 的内容,底图换成 bgSrc 的,文字样式取 txtSrc 同序号的;decor = 普通项都有、选中项没有的装饰图名(如价格条底,选中项把它画进了选中底图):
+  // 做选中态时去掉,做常态时从普通项 R 按同名父分组、同位置补回
+  const copyAs = (t, bgSrc, txtSrc, decor, mode, R) => {
     const kids = t.children.map(c => reid(JSON.parse(JSON.stringify(c)))), my = bgOf({children: kids}), tt = texts({children: kids}), st = texts(txtSrc);
     if (my && bgSrc){ my.m.spriteId = bgSrc.m.spriteId; my.m.x += bgSrc.x - my.x; my.m.y += bgSrc.y - my.y; my.m.w = bgSrc.m.w; my.m.h = bgSrc.m.h; }
     tt.forEach((m, i) => { const o = st[i]; if (o){ m.textColor = o.textColor; m.font = o.font; } });
+    if (mode === "sel"){ const strip = l => l.filter(m => !(m.type === "image" && decor.includes(m.name))).map(m => { m.children = strip(m.children); return m; }); return strip(kids); }
+    if (mode === "norm") imgs(R).filter(e => decor.includes(e.m.name)).forEach(e => {
+      let host = null; if (e.par) walk(m => { if (!host && m.type === "container" && m.name === e.par.name) host = m; }, kids);
+      const list = e.par ? (host ? host.children : null) : kids; if (!list) return;
+      const src = e.par ? e.par.children : R.children;
+      list.splice(Math.min(list.length, Math.max(0, src.indexOf(e.m))), 0, reid(JSON.parse(JSON.stringify(e.m))));
+    });
     return kids;
   };
+  // 先还原以前拆出的两层(显示着的那层就是原内容),再按当前规则重拆:旧任务点一键配动效也能用上新规则
+  walk(n => { if (!n.radio) return; const keep = n.children.find(c => (c.name === "常态" || c.name === "选中态") && !c.hiddenByDefault); if (keep && n.children.length === 2) n.children = keep.children; delete n.radio; }, nodes);
   const lists = [nodes]; walk(n => { if (n.children.length) lists.push(n.children); }, nodes);
   let gid = 0, made = 0;
   lists.forEach(list => {
@@ -1862,8 +1874,10 @@ function buildRadioTabs(nodes){
       if (odd.length !== 1 || Object.keys(count).length !== 2) return;
       g.forEach(d => used.add(d));
       const S = odd[0], R = g.find(t => t !== S), sBg = bgOf(S), rBg = bgOf(R), key = "rg" + S.id + "_" + (gid++);
+      const others = g.filter(t => t !== S), has = (t, nm) => imgs(t).some(e => e.m.name === nm);
+      const decor = [...new Set(imgs(R).map(e => e.m.name))].filter(nm => nm !== rBg.m.name && !has(S, nm) && others.every(t => has(t, nm)));
       g.forEach(t => {
-        const sel = t === S ? t.children : copyAs(t, sBg, S), norm = t === S ? copyAs(t, rBg, R) : t.children;
+        const sel = t === S ? t.children : copyAs(t, sBg, S, decor, "sel"), norm = t === S ? copyAs(t, rBg, R, decor, "norm", R) : t.children;
         const box = (name, kids, hidden) => ({id: newId(), type: "container", name, children: kids, anchor: "c", motion: "none", motionDelay: 0, x: 0, y: 0, w: t.w, h: t.h, figma: {x: 0, y: 0, w: t.w, h: t.h}, hiddenByDefault: hidden});
         t.children = [box("常态", norm, t === S), box("选中态", sel, t !== S)]; t.radio = key;
       });
@@ -1878,7 +1892,7 @@ function resetAuto(nodes){ walk(n => { if (n.protoLink) return; if (n.type !== "
 /* 一键配动效与交互。按钮:整个模块所有页面一起重配——先全部复位,再按页面顺序逐页识别(标识与整体导入时一致),最后重新连好页面跳转;
    silent(导入时):只配刚建好的当前页,某页切图全缺失时也不弹窗打断 */
 // 自动配置规则(tidyPage / autoInteract / autoMotion / autoLinkPages)有影响结果的改动时改这个值
-const AUTO_RULES = "2026-10-15c";
+const AUTO_RULES = "2026-10-15d";
 function autoConfigure(silent){
   if (silent){ resetAuto(proj.nodes); if (countNodes()){ tidyPage(proj.nodes); autoInteract(); autoMotion(); } return; }
   // 有没量过的高列切图才异步量一次再配;没有(或环境不能解码图片,如离线体检)就直接同步配
