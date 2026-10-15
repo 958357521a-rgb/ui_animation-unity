@@ -50,7 +50,6 @@ namespace Bud.AmountRechargeLibrary
             ("cardItem7", "cardItem7Status", "cardItem7RewardName", "cardItem7Amount", null),
         };
         private const string GoChargeKey = "buttonPrimary";      // 前往充值
-        private const string RulesKey = "rulesLink";             // 累计充值规则
         private const string TotalAmountKey = "totalAmount";     // 累计充值金额
         // 金额显隐:点「金额=隐藏」层 → 显示「金额=显示」层,反之亦然;切换由 View 完成,这里只处理初始状态
         private const string AmountHiddenLayerKey = "amountRechargeLibrarySwap";
@@ -98,14 +97,6 @@ namespace Bud.AmountRechargeLibrary
         {
             if (key == GoChargeKey) { OnBtnGoChargeClick(); handled = true; return; }
             if (key == AmountHiddenLayerKey || key == AmountShownLayerKey) { handled = true; return; }   // 显隐由 View 自己切
-            if (key == RulesKey)
-            {
-                // TODO 旧版「累计充值规则」打开的是 prefab 里的 Go_Tips 弹窗(静态文字);新设计稿只有一个页面、没有规则弹窗,
-                // 点了没有目标。让设计补一个规则弹窗页(带关闭按钮)后,这里改成 View.OpenPopup(序号)。
-                Debug.LogWarning("[AmountRechargeLibraryController] 规则按钮:设计稿里没有规则弹窗,暂不处理");
-                handled = true;
-                return;
-            }
             foreach (var c in _cards)
             {
                 if (c.key != key) continue;
@@ -139,6 +130,7 @@ namespace Bud.AmountRechargeLibrary
                 if (c.rewardName == null) missing.Add(d.name);
                 if (c.amount == null) missing.Add(d.amount);
                 if (d.count != null && c.count == null) missing.Add(d.count);
+                FitRewardName(c.rewardName);
                 c.statusTemplate = c.status != null ? c.status.text : null;
                 c.amountTemplate = c.amount != null ? c.amount.text : null;
                 c.countTemplate = c.count != null ? c.count.text : null;
@@ -150,6 +142,19 @@ namespace Bud.AmountRechargeLibrary
             if (View.GetButton(GoChargeKey) == null) missing.Add(GoChargeKey);
             if (missing.Count > 0)
                 Debug.LogError($"[AmountRechargeLibraryController] 视图里找不到这些标识:{string.Join("、", missing)}。对照工作台 README 事件表改 AmountRechargeLibraryController.Logic.cs 顶部的 DesignCards。");
+        }
+
+        // 奖励名(服务端下发的 title,如「优优币*12+巫灵夜游会头像框」)比设计稿的占位文字长:开自动缩小,最大 = 设计稿字号,
+        // 最小 = 55%;横向 Wrap + 纵向 Truncate,保证缩小后落在文字框里、不超出卡片(缩到最小仍放不下的才会被截掉)
+        private static void FitRewardName(Text t)
+        {
+            if (t == null) return;
+            int max = t.fontSize;
+            t.resizeTextForBestFit = true;
+            t.resizeTextMaxSize = max;
+            t.resizeTextMinSize = Mathf.Max(2, Mathf.RoundToInt(max * 0.55f));
+            t.horizontalOverflow = HorizontalWrapMode.Wrap;
+            t.verticalOverflow = VerticalWrapMode.Truncate;
         }
 
         // ---------- 赛季 / 档位表(照搬旧版 GetCurActivityId / GenerateContent 的取表部分)----------
