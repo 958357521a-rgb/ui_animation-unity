@@ -1817,13 +1817,22 @@ function groupHotspots(nodes){
       if (first < 0) first = i;
       grab.push(v); taken.add(n);
     }
+    const under = [];   // 收进来的切图原本画在热区下面:放在热区自己的内容(如热区里的数量文字)前面,不能盖住它们
     grab.forEach(v => {
       const list = v.parent ? v.parent.children : nodes, nx = v.ax - h.ax, ny = v.ay - h.ay;
       list.splice(list.indexOf(v.n), 1);
       if (v.n.figma) v.n.figma = Object.assign({}, v.n.figma, {x: v.n.figma.x + nx - v.n.x, y: v.n.figma.y + ny - v.n.y});
-      v.n.x = nx; v.n.y = ny; h.n.children.push(v.n); moved++;
+      v.n.x = nx; v.n.y = ny; under.push(v.n); moved++;
     });
+    if (under.length) h.n.children = under.concat(h.n.children);
   });
+  // 修复旧版收拢的结果(收进来的切图曾追加在热区内容后面):热区里的文字若被排在它后面、整块盖住它的图挡住,把文字挪到最上面
+  walk(h => {
+    if (!isHot(h) || !h.children.length) return;
+    const covers = (a, t) => a.type !== "text" && a.x <= t.x + 1 && a.y <= t.y + 1 && a.x + a.w >= t.x + t.w - 1 && a.y + a.h >= t.y + t.h - 1;
+    const hid = h.children.filter((t, i) => t.type === "text" && h.children.slice(i + 1).some(a => covers(a, t)));
+    if (hid.length) h.children = h.children.filter(c => !hid.includes(c)).concat(hid);
+  }, nodes);
   return moved;
 }
 // 一键配置前整理页面结构(都可重复执行):补认滚动区 → 热区收拢按钮切图 → 奖励轨道改横向滚动 → 收内容区
@@ -1892,7 +1901,7 @@ function resetAuto(nodes){ walk(n => { if (n.protoLink) return; if (n.type !== "
 /* 一键配动效与交互。按钮:整个模块所有页面一起重配——先全部复位,再按页面顺序逐页识别(标识与整体导入时一致),最后重新连好页面跳转;
    silent(导入时):只配刚建好的当前页,某页切图全缺失时也不弹窗打断 */
 // 自动配置规则(tidyPage / autoInteract / autoMotion / autoLinkPages)有影响结果的改动时改这个值
-const AUTO_RULES = "2026-10-15d";
+const AUTO_RULES = "2026-10-15e";
 function autoConfigure(silent){
   if (silent){ resetAuto(proj.nodes); if (countNodes()){ tidyPage(proj.nodes); autoInteract(); autoMotion(); } return; }
   // 有没量过的高列切图才异步量一次再配;没有(或环境不能解码图片,如离线体检)就直接同步配
