@@ -1178,10 +1178,12 @@ async function importScreens(frames, render, opts){
   }
   const [root, ...others] = proj.pages;   // 补充进来的页面排回弹窗前面:主页 → 页面 → 弹窗(页面序号导出时现算,调顺序不影响跳转)
   proj.pages = [root, ...others.filter(p => p.kind !== "popup"), ...others.filter(p => p.kind === "popup")];
+  const popups = detectPopupVariants();   // 「同一屏 + 弹窗」的重复界面 → 弹窗页;重建模块时整体重配(标识与以后一键配动效一致),补充时只重配这几页
+  if (popups.length) reconfigurePages(opts.mode === "new" ? proj.pages.filter(p => p.nodes.length) : popups);
   const links = autoLinkPages();
   proj.activePage = proj.pages[0].id; ensurePages();
   selId = null; renderAll(); fitStage(); autosave();
-  return {results, links};
+  return {results, links, popups};
 }
 function progDialog(title){
   const d = document.createElement("dialog");
@@ -1197,10 +1199,11 @@ function importReport(r, mode){
   const vars = r.results.reduce((a, x) => a + (x.variants || 0), 0), varExtra = r.results.reduce((a, x) => a + (x.variantExtra || 0), 0);
   showMsg(mode === "new" ? "模块已导入" : "页面已加入",
     (mode === "new" ? `已导入 ${r.results.length} 个界面:` + ["主页", kindSplit(pages - 1, pops)].filter(Boolean).join(" + ") : `已加入 ${r.results.length} 个界面:${kindSplit(pages, pops)}`)
-    + `,共 ${imgs} 张切图${miss ? `(${miss} 张缺失已跳过)` : ""}。<br>每页已按图层角色配好进场动效和点击交互;自动连好 ${r.links.length} 条跳转:`
+    + `,共 ${imgs} 张切图${miss ? `(${miss} 张缺失已跳过)` : ""}。<br>每页已按图层角色配好进场动效和点击交互;自动连好 ${r.links.total != null ? r.links.total : r.links.length} 条跳转:`
     + `<div style="max-height:30vh;overflow:auto;margin:4px 0 8px;color:var(--dim)">${r.links.map(l => "· " + escHtml(l)).join("<br>") || "(没有识别到可自动连接的跳转)"}</div>`
     + (vars ? `<br>${vars} 个交互组件(Figma 原型的点击切换)已还原为「当前状态 + 目标状态」两个子节点,点当前状态显示目标状态、点目标状态收起${varExtra ? `;另有 ${varExtra} 个目标状态(组件有多于两个状态)暂未导入,只接了第一个` : ""}。` : "")
-    + `点「▶ 试玩」从主页开始点卡片测试;跳转目标可在属性面板「点击后」修改。`);
+    + linkSummary(r.links, r.popups).map(t => `<br>${escHtml(t)}。`).join("")
+    + `<br>点「▶ 试玩」从主页开始点卡片测试;跳转目标可在属性面板「点击后」修改。`);
 }
 // 导入流程:读结构(loadFrames)→ 渲染切图(render)→ 建页面、配动效交互、连跳转 → 汇报
 async function runImport(sel, loadFrames, render){
@@ -1328,6 +1331,56 @@ const PAGE_WORDS = [["圣天使之翼","wing"],["福利规则","rules"],["奖励
   ["到账确认中","pending"],["到账成功","arrived"],["钻石商城","shop"],["发型","hair"],["头发","hair"],["鞋子","shoe"],["裙","dress"],["特效","effect"],["动作","action"],["自选","choice"]];
 function pageSlug(name){ let t = String(name).split("/")[0]; PAGE_WORDS.forEach(([cn, en]) => { t = t.split(cn).join(" " + en + " "); }); return camelKey(t) || "page"; }
 
+// 页面核心名:去掉开头「NN · 」和结尾「 · 分层拼装」
+const pageCore = p => String((p && p.name) || "").replace(/^\s*\d+\s*[·.\-、]\s*/, "").replace(/\s*·\s*分层拼装\s*$/, "").trim();
+const POPUP_HINT = /获取途径|图标名称|限购次数|当前拥有/;
+/* 弹窗变体:设计稿里「同一屏 + 弹窗」会画成两张几乎一样的界面(核心名/名字相同),后一张比前一张多出一个全屏遮罩和一个对话框。
+   把后一张改成弹窗页,只留多出来的图层(与前一张重复的图层丢弃)。幂等:已经是弹窗的不再处理。返回被改成弹窗的页面 */
+function detectPopupVariants(){
+  ensurePages();
+  const done = [];
+  for (let j = 1; j < proj.pages.length; j++){
+    const B = proj.pages[j]; if (B.kind === "popup" || !B.nodes.length) continue;
+    for (const A of proj.pages.slice(0, j)){
+      if (A.kind === "popup" || !A.nodes.length || !(pageCore(A) === pageCore(B) || A.name === B.name)) continue;
+      const names = new Set(A.nodes.map(n => n.name));
+      if (!A.nodes.every(n => B.nodes.some(m => m.name === n.name))) continue;
+      const extras = B.nodes.filter(n => !names.has(n.name));
+      const mask = extras.find(n => n.w >= STAGE_W * 0.95 && n.h >= STAGE_H * 0.95);
+      const dialogs = extras.filter(n => n !== mask && (n.type === "container" || (n.w >= 300 && n.h >= 150)));
+      if (!mask || !dialogs.length) continue;
+      const dropped = B.nodes.filter(n => !extras.includes(n));
+      let hint = ""; dialogs.forEach(d => walk(m => { hint += " " + (m.name || "") + " " + (m.text || ""); }, [d]));
+      B.nodes = extras; B.kind = "popup"; B.popupOf = A.id; B.name = pageCore(B) + " · " + (POPUP_HINT.test(hint) ? "道具详情弹窗" : "弹窗");
+      const used = new Set(); walkAll(n => { if (n.spriteId) used.add(n.spriteId); });
+      walk(n => { if (n.spriteId && !used.has(n.spriteId)) delete proj.assets[n.spriteId]; }, dropped);   // 丢掉的重复图层带的贴图不再留在工程里
+      done.push(B); break;
+    }
+  }
+  if (done.length){ const [root, ...others] = proj.pages; proj.pages = [root, ...others.filter(p => p.kind !== "popup"), ...others.filter(p => p.kind === "popup")]; }
+  ensurePages();
+  return done;
+}
+// 弹窗变体页的收尾:遮罩拦截点击并可点击 → 关闭弹窗(Back);对话框弹入,它的底板拦截点击(点对话框不会穿到遮罩上关掉弹窗)
+function tuneVariantPopup(pg){
+  const used = new Set(); walkAll(n => { if (n.key) used.add(n.key); });
+  const mask = pg.nodes.find(n => n.w >= STAGE_W * 0.95 && n.h >= STAGE_H * 0.95);
+  if (mask){
+    const k0 = (pageSlug(pg.name) === "page" ? "popup" : pageSlug(pg.name)) + "MaskClose"; let k = k0, i = 2; while (used.has(k)) k = k0 + (i++);
+    mask.blockRaycast = true; mask.clickable = true; mask.isClose = true; mask.key = k; mask.clickMotion = "none"; delete mask.clickAction; delete mask.clickTarget; delete mask.clickTargetPage;
+  }
+  pg.nodes.forEach(d => { if (d === mask) return; d.motion = "popIn"; d.motionDelay = 0.05; d.children.forEach(c => { if (c.type === "image" && c.w >= d.w * 0.8) c.blockRaycast = true; }); });
+}
+// 复位后按页面顺序逐页重配动效与交互(先复位是为了让标识去重结果与整体导入时一致),弹窗变体页再收尾
+function reconfigurePages(pages){
+  const cur = proj.activePage;
+  pages.forEach(p => resetAuto(p.nodes));
+  for (const p of pages){ proj.activePage = p.id; ensurePages(); autoInteract(); autoMotion(); if (p.popupOf) tuneVariantPopup(p); }
+  proj.activePage = cur; ensurePages();
+}
+const linkSummary = (links, pops) => [pops && pops.length ? "识别出 " + pops.length + " 个弹窗页(" + pops.map(p => p.name).join("、") + ")" : "", links && links.named ? "按名字连上 " + links.named + " 条跳转" : "",
+  links && links.unlinked && links.unlinked.length ? "没连上的按钮(前 10 个):" + links.unlinked.slice(0, 10).join("、") + (links.unlinked.length > 10 ? " 等" : "") : ""].filter(Boolean);
+
 /* 自动连跳转:主页卡片 → 对应详情页;规则链接 → 规则弹窗;详情页「领取」→ 领取成功弹窗、「确认兑换」→ 确认兑换弹窗;确认兑换弹窗的「确认」→ 兑换成功弹窗 */
 const CARD_SYN = {hair:["发型","头发"], dress:["裙","服饰"], shoe:["鞋"], coin:["商品币","币"], bench:["长椅"], action:["动作"], effect:["特效"], wing:["翼","翅膀"]};
 // 只连"可点击、还没指向页面"的元素(设成「仅触发事件」的也算还没指向);onlyPage 给定时只处理那一页上的按钮,别的页不动
@@ -1359,6 +1412,51 @@ function autoLinkPages(onlyPage){
   if (confirmPop && donePop && inScope(confirmPop)) walk(n => {
     if (n.clickable && /^(confirm|确定|确认)$/i.test(n.name.split("/").pop())){ n.isClose = false; n.clickAction = "openPopup"; n.clickTargetPage = donePop.id; links.push(`「${confirmPop.name}」的「确认」→ 弹窗「${donePop.name}」`); }
   }, confirmPop.nodes);
+  // ---- 按名字连:动作名(「操作/<动作名>」去掉前缀,或按钮文字)对页面核心名。优先级:等于核心名 → 互相包含(取核心名最短的页)→ 页签组 → 「预览…」开弹窗;都不匹配保持现状 ----
+  // 页签组:一组页面(≥2 页)每页都有一组与这些页核心名一一对应的可点元素;组内页签互相 openPage,组外连到组内任一页的按钮一律连到组里第一页
+  // 连到主页(第 0 页)没有 OpenPage(0):按「返回」处理(isClose,Back 回到栈底的主页)
+  const cjk = s => (String(s).match(/[\u4e00-\u9fff]/g) || []).length;
+  const opName = n => { const m = String(n.name || "").match(/^操作\/(.+)$/); if (m) return m[1].trim(); if (n.type === "button") return String(n.label || "").trim(); const t = textOf(n).trim(); return cjk(t) >= 2 && t.length <= 12 ? t : ""; };
+  const hot = n => (n.clickable || n.type === "button") && !n.protoLink;
+  const pagesOnly = proj.pages.filter(p => p.kind !== "popup");
+  const acts = new Map(pagesOnly.map(p => { const set = new Set(); walk(n => { if (hot(n)){ const a = opName(n); if (a) set.add(a); } }, p.nodes); return [p.id, set]; }));
+  const groups = [], seenG = new Set();
+  pagesOnly.forEach(p => {
+    const S = pagesOnly.filter(q => acts.get(p.id).has(pageCore(q)));
+    if (S.length < 2 || !S.includes(p) || !S.every(q => S.every(r => acts.get(q.id).has(pageCore(r))))) return;
+    const k = S.map(q => q.id).join(","); if (!seenG.has(k)){ seenG.add(k); groups.push(S); }
+  });
+  const popupFor = pg => {   // 当前页核心名(或它的前缀)对应的弹窗页:弹窗变体的底页核心名等于它、或以它开头
+    const c = pageCore(pg);
+    const cand = popups.map(pp => ({pp, bc: pp.popupOf && pageById(pp.popupOf) ? pageCore(pageById(pp.popupOf)) : ""})).filter(x => x.bc && (x.bc === c || x.bc.startsWith(c)));
+    cand.sort((a, b) => ((a.bc === c) ? 0 : 1) - ((b.bc === c) ? 0 : 1) || a.bc.length - b.bc.length);
+    return cand.length ? cand[0].pp : null;
+  };
+  const agg = new Map(), unl = new Set(); let named = 0;
+  const note = (pg, act, label) => { const k = pg.name + "\u0001" + act + "\u0001" + label; agg.set(k, (agg.get(k) || 0) + 1); named++; };
+  proj.pages.filter(inScope).forEach(pg => walk(n => {
+    if (!free(n) || n.isClose || n.protoLink) return;
+    const act = opName(n); if (!act) return;
+    let t = pagesOnly.find(q => pageCore(q) === act) || null;
+    if (!t && cjk(act) >= 2){
+      const c = pagesOnly.filter(q => cjk(pageCore(q)) >= 2 && (act.includes(pageCore(q)) || pageCore(q).includes(act))).sort((a, b) => pageCore(a).length - pageCore(b).length);
+      t = c[0] || null;
+    }
+    if (t){
+      const g = groups.find(x => x.includes(t)); if (g && !g.includes(pg)) t = g[0];
+      if (t === pg) return;   // 就是当前页(页签高亮的那一项),不用连
+      if (t === root){ n.isClose = true; note(pg, act, "返回主页"); }
+      else { n.clickAction = "openPage"; n.clickTargetPage = t.id; note(pg, act, "页面「" + t.name + "」"); }
+      return;
+    }
+    if (/^预览/.test(act) && pg.kind !== "popup"){
+      const pp = popupFor(pg); if (pp){ n.clickAction = "openPopup"; n.clickTargetPage = pp.id; note(pg, act, "弹窗「" + pp.name + "」"); return; }
+    }
+    if (/^操作\//.test(n.name || "")) unl.add(act);
+  }, pg.nodes));
+  const direct = links.length;
+  agg.forEach((cnt, k) => { const [pn, act, label] = k.split("\u0001"); links.push("「" + pn + "」的「" + act + "」" + (cnt > 1 ? " ×" + cnt : "") + " → " + label); });
+  links.total = direct + named; links.named = named; links.unlinked = [...unl];
   return links;
 }
 
@@ -1380,6 +1478,9 @@ function autoInteract(){
     if (n.type === "button"){ used.add(n.key); return; }
     // 金额/档位等含数字的文字标为动态文本(即使位于可点击分组里)
     if (n.type === "text" && !n.dynamic && /\d/.test(n.text || "") && /amount|tier|count|price|progress|time|金额|数量|价格|时间|剩余|累计|档位/i.test(nm)){ n.dynamic = true; n.key = uniq(camelKey(nm) || "value"); }
+    // Figma 里命名为「操作/<动作名>」的图层是设计师标好的可点热区(返回/关闭类设成关闭,其余由 autoLinkPages 按名字连跳转)
+    const op = nm.match(/^操作\/(.+)$/);
+    if (op && n.type !== "text"){ n.clickable = true; if (/^(返回|关闭|取消|back|close)/i.test(op[1].trim())) n.isClose = true; const ck = camelKey(op[1]); n.key = uniq(n.isClose ? "back" : (/^[A-Za-z]/.test(ck) ? ck : "action")); return; }
     if (underClickable(n)) return;
     if (depth === 0 && /(^0?1_?back|\bback\b|fanhui|返回|close|关闭)/i.test(nm)){ n.clickable = true; n.isClose = true; n.key = uniq("back"); return; }
     if (parent && parent.isScrollContent && n.type === "container"){
@@ -1390,7 +1491,8 @@ function autoInteract(){
     // 弹窗里的关闭/取消/知道了/确认:默认关闭弹窗(确认兑换→兑换成功这类由 autoLinkPages 改成打开下一个弹窗)
     const tail0 = nm.split("/").pop();
     if (n.type !== "text" && /^(close|cancel|understood|confirm|ok|关闭|取消|确定|知道了?)$/i.test(tail0)){ n.clickable = true; n.isClose = true; n.key = uniq(camelKey(tail0) || "close"); return; }
-    if (/cta|btn|button|按钮/i.test(nm) && n.type !== "text"){ n.clickable = true; n.key = uniq(camelKey(nm) || "cta"); return; }
+    // 整词匹配:Re-cta-ngle 这类图层名不算按钮
+    if (/(^|[^a-z])(cta|btn|button)([^a-z]|$)|按钮/i.test(nm) && n.type !== "text"){ n.clickable = true; n.key = uniq(camelKey(nm) || "cta"); return; }
     if (/link|链接/i.test(nm)){ n.clickable = true; n.key = uniq(camelKey(nm) || "link"); return; }
     if (/visib|可见|显隐|eye|toggle/i.test(nm) && n.type !== "text"){ n.clickable = true; n.key = uniq("toggle" + pascal(camelKey(nm) || "Visibility")); return; }
   });
@@ -1435,13 +1537,13 @@ function autoConfigure(silent){
   const pages = proj.pages.filter(p => p.nodes.length);
   if (!pages.length) return showMsg("画布是空的", "先从 Figma 拉取一个界面。");
   pushHistory();
-  const cur = proj.activePage;
-  pages.forEach(p => resetAuto(p.nodes));
-  for (const p of pages){ proj.activePage = p.id; ensurePages(); autoInteract(); autoMotion(); }
-  proj.activePage = cur; ensurePages();
+  const pops = detectPopupVariants();   // 先把「同一屏 + 弹窗」的重复界面认成弹窗页(幂等)
+  const all = proj.pages.filter(p => p.nodes.length);
+  reconfigurePages(all);
   const links = proj.pages.length > 1 ? autoLinkPages() : [];
   renderAll(); autosave(); playPreview();
-  toast((pages.length > 1 ? `已为全部 ${pages.length} 个页面重新配置动效与交互` : "已重新配置动效与交互") + (links.length ? `,连好 ${links.length} 条跳转` : "") + ";正在预览当前页(Ctrl+Z 可撤销)", 6000);
+  toast((all.length > 1 ? `已为全部 ${all.length} 个页面重新配置动效与交互` : "已重新配置动效与交互") + (links.length ? `,连好 ${links.total != null ? links.total : links.length} 条跳转` : "")
+    + linkSummary(links, pops).map(s => ";" + s).join("") + ";正在预览当前页(Ctrl+Z 可撤销)", 9000);
 }
 
 /* ================= 保存/载入 ================= */
