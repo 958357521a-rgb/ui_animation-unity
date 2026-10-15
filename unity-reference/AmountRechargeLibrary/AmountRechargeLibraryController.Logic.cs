@@ -144,9 +144,9 @@ namespace Bud.AmountRechargeLibrary
                 Debug.LogError($"[AmountRechargeLibraryController] 视图里找不到这些标识:{string.Join("、", missing)}。对照工作台 README 事件表改 AmountRechargeLibraryController.Logic.cs 顶部的 DesignCards。");
         }
 
-        // 奖励名(服务端下发的 title,如「优优币*12+巫灵夜游会头像框」)比设计稿的占位文字长:按文字框宽度自动缩小字号,
-        // 最大 = 设计稿字号,最小 = 75%;MiddleCenter(prefab 里奖励名也是这个对齐,框中心 = 正常字号时的字位置,缩小后仍居中)。
-        // 先找「单行放得下」的最大字号;缩到最小仍放不下就在最小字号折成两行(纵向 Overflow,两行约 48px,仍在底下黄色色带 54px 里)
+        // 奖励名(服务端下发的 title,如「优优币*12+巫灵夜游会头像框」)比设计稿的占位文字长:MiddleCenter,横向 Wrap、纵向 Overflow;
+        // 字号 = 设计稿字号起往下找「按框宽折行后总高度放得进框」的最大字号(框高 54px = 底下色带高度,够放 2 行),最小 75%;
+        // 正常长度的名字单行放得下,保持设计稿字号不变。缩到 75% 仍放不下才保持 75%(会略超出色带)
         private void FitRewardName(Text t)
         {
             if (t == null) return;
@@ -156,12 +156,60 @@ namespace Bud.AmountRechargeLibrary
             t.alignment = TextAnchor.MiddleCenter;
             t.horizontalOverflow = HorizontalWrapMode.Wrap;
             t.verticalOverflow = VerticalWrapMode.Overflow;
-            float width = t.rectTransform.rect.width;
+            float height = t.rectTransform.rect.height;
             int size = max;
             t.fontSize = size;
-            while (size > min && t.preferredWidth > width) t.fontSize = --size;
+            while (size > min && t.preferredHeight > height) t.fontSize = --size;
         }
         private readonly Dictionary<Text, int> _nameMax = new Dictionary<Text, int>();
+
+        // 里程碑金额(「98 元」「1088 元」):文字 MiddleCenter,文字框和胶囊底都以卡片中心(= 圆点中心,锚点 x=0)为中心,
+        // 胶囊宽度 = max(设计稿宽度, 文字宽度 + 两边留白),这样不管几位数都正好压在圆点下面、文字不会超出胶囊
+        private readonly Dictionary<RectTransform, float> _pillMinWidth = new Dictionary<RectTransform, float>();
+        private void FitAmountPill(Text t)
+        {
+            if (t == null) return;
+            t.alignment = TextAnchor.MiddleCenter;
+            t.horizontalOverflow = HorizontalWrapMode.Wrap;   // 框宽已 >= 文字宽度,不会折行;不依赖 Overflow 模式下的对齐基准
+            RectTransform pill = null;
+            foreach (Transform ch in t.rectTransform.parent)
+                if (ch.name == "Milestone/amount-pill") { pill = ch as RectTransform; break; }
+            var rt = t.rectTransform;
+            float w = rt.sizeDelta.x;
+            if (pill != null)
+            {
+                if (!_pillMinWidth.TryGetValue(pill, out var minW)) _pillMinWidth[pill] = minW = pill.sizeDelta.x;
+                w = Mathf.Max(minW, t.preferredWidth + 40f);
+                pill.sizeDelta = new Vector2(w, pill.sizeDelta.y);
+                pill.anchoredPosition = new Vector2(0f, pill.anchoredPosition.y);
+                // 文字框 = 胶囊框(同中心、同宽高),MiddleCenter:字形在框里上下左右都居中
+                rt.sizeDelta = pill.sizeDelta;
+                rt.anchoredPosition = pill.anchoredPosition;
+                return;
+            }
+            rt.sizeDelta = new Vector2(w, rt.sizeDelta.y);
+            rt.anchoredPosition = new Vector2(0f, rt.anchoredPosition.y);
+        }
+
+        // 数量胶囊(第 3/5/6 档「金币图标 + ×N」):图标和数字作为一组在胶囊里水平 + 垂直居中
+        // 组宽 = 图标宽 + 8 + 数字宽;图标中心在 -组宽/2 + 图标宽/2,数字 MiddleLeft 紧跟在图标右边 8px,两者纵向中心 = 胶囊中心
+        private void FitQuantityPill(Text t)
+        {
+            if (t == null) return;
+            var pill = t.rectTransform.parent as RectTransform;
+            if (pill == null || pill.name != "Panel") return;
+            RectTransform coin = null;
+            foreach (Transform ch in pill) if (ch.name.StartsWith("Art/coin")) { coin = ch as RectTransform; break; }
+            if (coin == null) return;
+            t.alignment = TextAnchor.MiddleLeft;
+            t.horizontalOverflow = HorizontalWrapMode.Overflow;
+            t.verticalOverflow = VerticalWrapMode.Overflow;
+            float coinW = coin.sizeDelta.x, textW = Mathf.Ceil(t.preferredWidth) + 2f, groupW = coinW + 8f + textW;
+            coin.anchoredPosition = new Vector2(-groupW / 2f + coinW / 2f, 0f);
+            var rt = t.rectTransform;
+            rt.sizeDelta = new Vector2(textW, rt.sizeDelta.y);
+            rt.anchoredPosition = new Vector2(-groupW / 2f + coinW + 8f + textW / 2f, 0f);
+        }
 
         // ---------- 赛季 / 档位表(照搬旧版 GetCurActivityId / GenerateContent 的取表部分)----------
         private static ActivityId GetCurActivityId()
@@ -206,9 +254,9 @@ namespace Bud.AmountRechargeLibrary
                 c.button.gameObject.SetActive(c.reward != null);
                 if (c.reward == null) continue;
                 if (c.rewardName != null) { c.rewardName.text = c.reward.title; FitRewardName(c.rewardName); }
-                if (c.amount != null) c.amount.text = FillNumber(c.amountTemplate, c.reward.progress.ToString());
+                if (c.amount != null) { c.amount.text = FillNumber(c.amountTemplate, c.reward.progress.ToString()); FitAmountPill(c.amount); }
                 // TODO 第 1、7 档设计稿没有数量文字;其它档设计稿的数量文字要和 json 的 rewardNum1 对得上(S17:6/12/30/30/60)
-                if (c.count != null) c.count.text = FillNumber(c.countTemplate, c.reward.rewardNum1.ToString());
+                if (c.count != null) { c.count.text = FillNumber(c.countTemplate, c.reward.rewardNum1.ToString()); FitQuantityPill(c.count); }
                 // TODO 奖励图标(旧版按 rewardIcon1/rewardIcon2 从图集加载)、双奖励布局、「有预览」角标、已领取 / 锁 / 可领取高亮、进度条
                 // 在设计稿里都是写死的切图,View 没有暴露它们的 Image,不随赛季 / 状态变化。当前只对得上 S17 的 7 档;
                 // 要随状态切换需让设计把这几层做成「状态=xxx」的互切图层(像金额显隐那样),再在 View 里暴露出来。
