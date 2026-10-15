@@ -1665,6 +1665,7 @@ function reparentTo(n, fromList, toList, ax, ay, ox, oy){
 /* 奖励轨道:纯分组里 ≥3 张同尺寸的竖长卡片排成一行,且最后一张被后画的同高元素盖住一截(如钉在右侧的 50 级大奖列)→ 这排是一条可横向滑动的轨道。
    每张卡片和落在它上面的图标 / 文字收成一个分组,整排放进横向滚动区,可视宽度到盖住它的元素左边为止。重复执行不变。返回新建的轨道数 */
 function promoteCardTrack(nodes){
+  unwrapCardTracks(nodes);   // 先拆掉以前自动建的轨道再按当前规则重建,旧任务点「一键配动效」也能用上新的轨道范围
   const flat = [];
   const rec = (list, ox, oy, parent, anc) => list.forEach(n => { const f = {n, ax: ox + n.x, ay: oy + n.y, parent, anc}; flat.push(f); rec(n.children, f.ax, f.ay, n, anc.concat(n)); });
   rec(nodes, 0, 0, null, []);
@@ -1692,7 +1693,7 @@ function promoteCardTrack(nodes){
     const at = Math.min(...row.map(d => hostList.indexOf(d.n)).filter(i => i >= 0));   // 放在这排卡片最早画的位置,原来压在卡片上面的元素仍在上面
     const cw = (right - left) + (last.ax + last.n.w - coverL) + 8, h = bottom - top;   // 能把最后一张拖到盖住它的列左边完整露出
     const content = {id: newId(), type: "container", name: "内容", children: [], anchor: "l", motion: "none", motionDelay: 0, x: 0, y: 0, w: cw, h, isScrollContent: true, figma: {x: 0, y: 0, w: cw, h}};
-    const track = {id: newId(), type: "container", name: "奖励列表 · 可滑动", children: [content], anchor: "c", motion: "none", motionDelay: 0, scroll: "h",
+    const track = {id: newId(), type: "container", name: "奖励列表 · 可滑动", cardTrack: true, children: [content], anchor: "c", motion: "none", motionDelay: 0, scroll: "h",
       x: left - hostF.ax, y: top - hostF.ay, w: right - left, h, figma: {x: left - hostF.ax, y: top - hostF.ay, w: right - left, h}};
     groups.forEach(g => {
       const gx = g.card.ax - left, gy = g.card.ay - top;
@@ -1703,6 +1704,26 @@ function promoteCardTrack(nodes){
     hostList.splice(Math.min(at, hostList.length), 0, track); made++;
   }
   return made;
+}
+// 拆回自动建的奖励轨道(cardTrack 标记,或旧版建的同名横向滚动区):卡片分组里的切图放回轨道原来的位置,坐标换回所在分组的坐标
+function unwrapCardTracks(nodes){
+  const lists = [{list: nodes, ox: 0, oy: 0}];
+  const rec = (list, ox, oy) => list.forEach(n => { if (n.children.length){ lists.push({list: n.children, ox: ox + n.x, oy: oy + n.y}); rec(n.children, ox + n.x, oy + n.y); } });
+  rec(nodes, 0, 0);
+  lists.forEach(({list, ox, oy}) => {
+    for (let i = list.length - 1; i >= 0; i--){
+      const t = list[i];
+      if (!(t.cardTrack || (t.scroll === "h" && t.name === "奖励列表 · 可滑动"))) continue;
+      const content = t.children.find(c => c.isScrollContent); if (!content) continue;
+      const out = [];
+      content.children.forEach(box => box.children.forEach(n => {
+        const ax = ox + t.x + content.x + box.x + n.x, ay = oy + t.y + content.y + box.y + n.y, nx = ax - ox, ny = ay - oy;
+        if (n.figma) n.figma = Object.assign({}, n.figma, {x: n.figma.x + nx - n.x, y: n.figma.y + ny - n.y});
+        n.x = nx; n.y = ny; out.push(n);
+      }));
+      list.splice(i, 1, ...out);
+    }
+  });
 }
 /* 内容区:有左侧栏(贴左边、高 ≥ 60% 的窄条)的页面,把侧栏、左上角标题栏、返回以外的内容收进一个「内容区」节点,出场时整体从右侧滑入。
    页签组各页的内容区同名同位置,切页签时不重播(只有换掉的内容出场)。已有内容区就不再收。返回 1 / 0 */
