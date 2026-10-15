@@ -3,7 +3,7 @@
 //   --reconfigure  先在内存里模拟点一次「✦ 一键配动效」,列出会被改掉的交互/动效设置,再校验导出
 //   --out          把校验通过的交付包(.unitypackage)写到指定路径,等于不开浏览器直接导出
 // 检查项:全部 GameObject 在 UI 层、prefab 内 fileID 引用都能解析、每页一个页面节点 + CanvasGroup 且只有主页激活、
-//   View 的 pages[] 按顺序接好、跳转按钮调用了正确的 OpenPage/OpenPopup 序号、三个 C# 文件大括号配对、事件/数据标识合法且不重复;
+//   View 的 pages[] 按顺序接好、跳转按钮调用了正确的 OpenPage/SwitchPage/OpenPopup 序号、三个 C# 文件大括号配对、事件/数据标识合法且不重复;
 //   .unitypackage 结构(每个 GUID 目录含 asset/asset.meta/pathname、目录名与 meta 里的 guid 一致、落点都在模块目录下、prefab 引用的 GUID 全部在包内或是 UGUI/白名单字体)。
 // 改了生成器(genPrefab / genViewCs / genMotionCs / genClickFeedbackCs)或自动配置逻辑后跑一遍。需要 Node 18+。
 // 页面里的 DOM 用一个"什么都接受"的空桩代替,所以渲染类函数都是空跑;校验只看生成的 YAML 和 C#。
@@ -33,7 +33,7 @@ function check() {
   const ok = (cond, what) => res.checks.push((cond ? "✓ " : "✗ ") + what);
   if (__reconfigure) {
     const row = (p, n) => {
-      const click = !!(n.clickable || n.type === "button"), tp = n.clickTargetPage && /^open/.test(n.clickAction || "") ? pageById(n.clickTargetPage) : null;
+      const click = !!(n.clickable || n.type === "button"), tp = n.clickTargetPage && /^(open|switch)/.test(n.clickAction || "") ? pageById(n.clickTargetPage) : null;
       return { where: p.name.split("/")[0].trim() + " · " + n.name, 可点击: click, 关闭: !!n.isClose, 标识: click || n.dynamic ? n.key : "", 动态文本: !!n.dynamic,
         点击反馈: click ? n.clickMotion || "press" : "", 点击后: click ? n.clickAction || "event" : "", 目标节点: n.clickTarget ? (findNodeAll(n.clickTarget) || { name: "?" }).name : "",
         目标页面: tp ? tp.name : "", 动效: n.motion + "@" + (n.motionDelay || 0) };
@@ -103,8 +103,8 @@ function check() {
   // 每个"打开页面/打开弹窗"按钮:目标存在、类型对得上、View 里的监听确实调用了对应序号
   const navOk = [], navBad = [];
   walkAll(n => {
-    if (!(n.clickable || n.type === "button") || !/^open(Page|Popup)$/.test(n.clickAction || "")) return;
-    const idx = proj.pages.findIndex(p => p.id === n.clickTargetPage), tp = proj.pages[idx], want = n.clickAction === "openPage" ? "OpenPage" : "OpenPopup";
+    if (!(n.clickable || n.type === "button") || !/^(open|switch)(Page|Popup)$/.test(n.clickAction || "")) return;
+    const idx = proj.pages.findIndex(p => p.id === n.clickTargetPage), tp = proj.pages[idx], want = {openPage: "OpenPage", switchPage: "SwitchPage", openPopup: "OpenPopup"}[n.clickAction];
     const line = cs.View.split("\n").find(l => l.includes(`${n.key}Button.onClick.AddListener`)) || "";
     if (idx <= 0) navBad.push(`${n.name}:目标页面不存在`);
     else if ((tp.kind === "popup") !== (want === "OpenPopup")) navBad.push(`${n.name}:${want} 指向了${tp.kind === "popup" ? "弹窗" : "页面"}「${tp.name}」`);

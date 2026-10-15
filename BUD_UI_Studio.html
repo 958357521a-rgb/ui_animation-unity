@@ -109,6 +109,8 @@
   #stage.playing .rz{display:none!important}
   #stage.locked .rz{display:none!important}
   #stage.playing .node[data-click]{cursor:pointer}
+  #stage.playing .node{pointer-events:none}
+  #stage.playing .node[data-click], #stage.playing .node[data-scroll], #stage.playing .node[data-block], #stage.playing .node.playLayer{pointer-events:auto}
   #playBar{position:absolute;top:12px;left:50%;transform:translateX(-50%);background:var(--panel);border:1px solid var(--acc);border-radius:99px;padding:6px 8px 6px 16px;display:none;gap:8px;align-items:center;z-index:50;box-shadow:0 8px 30px #0009;white-space:nowrap}
   #playLog{position:absolute;right:12px;bottom:12px;width:360px;max-height:42%;overflow:auto;background:#0b0b10ee;border:1px solid var(--line);border-radius:10px;padding:8px 12px;display:none;z-index:50;font-size:12px}
   #playLog .ev{padding:3px 0;border-bottom:1px dashed #2a2a33;line-height:1.6}
@@ -371,7 +373,7 @@ function renderTree(){
     if (n.isClose) tags.push("关闭"); else if (n.clickable || n.type==="button") tags.push("可点击");
     if ((n.clickable || n.type==="button") && n.clickAction && n.clickAction!=="event"){
       const tp = pageById(n.clickTargetPage);
-      tags.push(n.clickAction === "openPage" || n.clickAction === "openPopup" ? "→" + (tp ? tp.name.split("/")[0].replace(/^\d+\s*·\s*/, "").trim() : "未选") : {toggle:"切换显隐",show:"显示节点",hide:"隐藏节点",swap:"切换到目标",mask:"数字遮罩",closePanel:"关闭面板"}[n.clickAction]);
+      tags.push(n.clickAction === "openPage" || n.clickAction === "switchPage" || n.clickAction === "openPopup" ? "→" + (tp ? tp.name.split("/")[0].replace(/^\d+\s*·\s*/, "").trim() : "未选") : {toggle:"切换显隐",show:"显示节点",hide:"隐藏节点",swap:"切换到目标",mask:"数字遮罩",closePanel:"关闭面板"}[n.clickAction]);
     }
     if (n.hiddenByDefault) tags.push("初始隐藏");
     if (isKeepOld(n)) tags.push("沿用旧资源");
@@ -406,6 +408,7 @@ function renderStage(){
     el.dataset.id = n.id; elById[n.id] = el;
     if (n.type==="button" || n.clickable) el.dataset.click = "1";
     if (n.scroll) el.dataset.scroll = n.scroll;
+    if (n.blockRaycast) el.dataset.block = "1";
     el.style.cssText = `left:${n.x}px;top:${n.y}px;width:${n.w}px;height:${n.h}px;animation-delay:${n.motionDelay||0}s`;
     if (n.type==="image" || n.type==="button"){
       const src = isKeepOld(n) && n.oldPreview ? n.oldPreview : n.spriteId && proj.assets[n.spriteId] ? proj.assets[n.spriteId].dataUrl : null;   // 指定了旧资源就直接显示旧图
@@ -491,7 +494,7 @@ function renderInsp(){
   if (n.type==="button" || n.clickable){
     h += row("点击反馈", `<div class="half"><select onchange="setProp('clickMotion',this.value)">${Object.entries(CLICK_MOTIONS).map(([k,v])=>`<option value="${k}" ${(n.clickMotion||"press")===k?"selected":""}>${v}</option>`).join("")}</select><button onclick="tryClickMotion()" style="flex:none">试一下</button></div>`);
     h += row("点击后", `<select onchange="setProp('clickAction',this.value)">${Object.entries(CLICK_ACTIONS).map(([k,v])=>`<option value="${k}" ${(n.clickAction||"event")===k?"selected":""}>${v}</option>`).join("")}</select>`);
-    if (n.clickAction === "openPage" || n.clickAction === "openPopup"){
+    if (n.clickAction === "openPage" || n.clickAction === "switchPage" || n.clickAction === "openPopup"){
       const others = (proj.pages || []).filter(p => p.id !== proj.activePage && (n.clickAction === "openPopup" ? p.kind === "popup" : p.kind !== "popup"));
       h += row("目标页面", `<select onchange="setProp('clickTargetPage',this.value||null)"><option value="">(请选择)</option>${others.map(p=>`<option value="${p.id}" ${n.clickTargetPage===p.id?"selected":""}>${escHtml(p.name)}</option>`).join("")}</select>`);
       if (!others.length) h += `<div class="row" style="color:var(--dim)">还没有可跳转的${n.clickAction === "openPopup" ? "弹窗" : "页面"},先在左侧「＋加页面」</div>`;
@@ -689,7 +692,7 @@ function playPreview(){ stage.classList.remove("previewing"); void stage.offsetW
 
 /* ================= 试玩模式:像真机一样点按钮、拖滚动区,日志显示程序会收到的回调 ================= */
 const CLICK_MOTIONS = {press:"按下缩放", bounce:"点击弹跳", shake:"点击抖动", flash:"点击闪烁", none:"无"};
-const CLICK_ACTIONS = {event:"仅触发事件", closePanel:"关闭整个面板", openPage:"打开页面", openPopup:"打开弹窗", toggle:"切换显示/隐藏", show:"显示节点", hide:"隐藏节点", swap:"切换到(显示目标、隐藏自己)", mask:"切换数字遮罩(***)"};
+const CLICK_ACTIONS = {event:"仅触发事件", closePanel:"关闭整个面板", openPage:"打开页面", switchPage:"切换页签(替换当前页,不进返回栈)", openPopup:"打开弹窗", toggle:"切换显示/隐藏", show:"显示节点", hide:"隐藏节点", swap:"切换到(显示目标、隐藏自己)", mask:"切换数字遮罩(***)"};
 let playing = false, elById = {};
 let playState = {hidden:{}, masked:{}, offset:{}};
 let playNav = {stack: [], popup: null}, playLayers = {base: null, popup: null};
@@ -713,6 +716,8 @@ function slideIn(dir, prev){
   if (prev && prev !== l){ const drop = () => prev.remove(); a.onfinish = a.oncancel = drop; setTimeout(drop, 400); }   // 页面在后台时动画事件会延后,定时兜底
 }
 function playOpenPage(id){ if (!pageById(id)) return false; const prev = playLayers.base; playNav.popup = null; playNav.stack.push(id); renderStage(); slideIn(1, prev); return true; }
+// 切换页签:替换导航栈顶(栈里只有主页时等于打开页面),不进返回栈,只淡入不滑动(与导出的 View.SwitchPage 一致)
+function playSwitchPage(id){ if (!pageById(id)) return false; const prev = playLayers.base, swap = playNav.stack.length > 1; if (swap && playNav.stack[playNav.stack.length - 1] === id) return true; playNav.popup = null; if (swap) playNav.stack.pop(); playNav.stack.push(id); renderStage(); slideIn(swap ? 0 : 1, prev); return true; }
 function playOpenPopup(id){ if (!pageById(id)) return false; playNav.popup = id; mountPopup(); return true; }
 function playBack(){ // 先关弹窗,再退页面,已在主页则请求关闭面板
   if (playNav.popup){ playNav.popup = null; unmountPopup(); return "popup"; }
@@ -772,11 +777,11 @@ function tryClickMotion(){ const n = findNode(selId), el = n && elById[n.id]; if
 function playClick(n, el){
   const act = n.clickAction || "event", target = n.clickTarget ? findNodeAll(n.clickTarget) : null;
   let note = "";
-  if (act === "openPage" || act === "openPopup"){
+  if (act === "openPage" || act === "switchPage" || act === "openPopup"){
     const pg = pageById(n.clickTargetPage);
     if (pg){
-      logEvent(`点击「${escHtml(n.name)}」→ <b>onAction("${escHtml(n.key || "")}")</b> · ${act === "openPage" ? "打开页面" : "打开弹窗"}「${escHtml(pg.name)}」`);
-      if (act === "openPage") playOpenPage(pg.id); else playOpenPopup(pg.id);
+      logEvent(`点击「${escHtml(n.name)}」→ <b>onAction("${escHtml(n.key || "")}")</b> · ${{openPage: "打开页面", switchPage: "切换到页签", openPopup: "打开弹窗"}[act]}「${escHtml(pg.name)}」`);
+      if (act === "openPage") playOpenPage(pg.id); else if (act === "switchPage") playSwitchPage(pg.id); else playOpenPopup(pg.id);
       return;
     }
   }
@@ -1375,7 +1380,7 @@ function tuneVariantPopup(pg){
 function reconfigurePages(pages){
   const cur = proj.activePage;
   pages.forEach(p => resetAuto(p.nodes));
-  for (const p of pages){ proj.activePage = p.id; ensurePages(); autoInteract(); autoMotion(); if (p.popupOf) tuneVariantPopup(p); }
+  for (const p of pages){ proj.activePage = p.id; ensurePages(); promoteScrollAreas(p.nodes); groupHotspots(p.nodes); autoInteract(); autoMotion(); if (p.popupOf) tuneVariantPopup(p); }
   proj.activePage = cur; ensurePages();
 }
 const linkSummary = (links, pops) => [pops && pops.length ? "识别出 " + pops.length + " 个弹窗页(" + pops.map(p => p.name).join("、") + ")" : "", links && links.named ? "按名字连上 " + links.named + " 条跳转" : "",
@@ -1416,6 +1421,7 @@ function autoLinkPages(onlyPage){
   // 页签组:一组页面(≥2 页)每页都有一组与这些页核心名一一对应的可点元素;组内页签互相 openPage,组外连到组内任一页的按钮一律连到组里第一页
   // 连到主页(第 0 页)没有 OpenPage(0):按「返回」处理(isClose,Back 回到栈底的主页)
   const cjk = s => (String(s).match(/[\u4e00-\u9fff]/g) || []).length;
+  const synAct = s => String(s).replace(/购买|开通/g, "解锁");   // 「购买通行证」按钮对「解锁通行证」页
   const opName = n => { const m = String(n.name || "").match(/^操作\/(.+)$/); if (m) return m[1].trim(); if (n.type === "button") return String(n.label || "").trim(); const t = textOf(n).trim(); return cjk(t) >= 2 && t.length <= 12 ? t : ""; };
   const hot = n => (n.clickable || n.type === "button") && !n.protoLink;
   const pagesOnly = proj.pages.filter(p => p.kind !== "popup");
@@ -1437,15 +1443,18 @@ function autoLinkPages(onlyPage){
   proj.pages.filter(inScope).forEach(pg => walk(n => {
     if (!free(n) || n.isClose || n.protoLink) return;
     const act = opName(n); if (!act) return;
-    let t = pagesOnly.find(q => pageCore(q) === act) || null;
+    const na = synAct(act);
+    let t = pagesOnly.find(q => synAct(pageCore(q)) === na) || null;
     if (!t && cjk(act) >= 2){
-      const c = pagesOnly.filter(q => cjk(pageCore(q)) >= 2 && (act.includes(pageCore(q)) || pageCore(q).includes(act))).sort((a, b) => pageCore(a).length - pageCore(b).length);
+      const c = pagesOnly.filter(q => cjk(pageCore(q)) >= 2 && (na.includes(synAct(pageCore(q))) || synAct(pageCore(q)).includes(na))).sort((a, b) => pageCore(a).length - pageCore(b).length);
       t = c[0] || null;
     }
     if (t){
-      const g = groups.find(x => x.includes(t)); if (g && !g.includes(pg)) t = g[0];
+      const g = groups.find(x => x.includes(t)), inGroup = !!g && g.includes(pg); if (g && !inGroup) t = g[0];
       if (t === pg) return;   // 就是当前页(页签高亮的那一项),不用连
       if (t === root){ n.isClose = true; note(pg, act, "返回主页"); }
+      // 同组页签互切 = 替换当前页(不进返回栈),这样在页签之间来回点后「返回」仍回到进入页签组之前的页
+      else if (inGroup){ n.clickAction = "switchPage"; n.clickTargetPage = t.id; note(pg, act, "页签「" + t.name + "」"); }
       else { n.clickAction = "openPage"; n.clickTargetPage = t.id; note(pg, act, "页面「" + t.name + "」"); }
       return;
     }
@@ -1483,7 +1492,7 @@ function autoInteract(){
     if (op && n.type !== "text"){ n.clickable = true; if (/^(返回|关闭|取消|back|close)/i.test(op[1].trim())) n.isClose = true; const ck = camelKey(op[1]); n.key = uniq(n.isClose ? "back" : (/^[A-Za-z]/.test(ck) ? ck : "action")); return; }
     if (underClickable(n)) return;
     if (depth === 0 && /(^0?1_?back|\bback\b|fanhui|返回|close|关闭)/i.test(nm)){ n.clickable = true; n.isClose = true; n.key = uniq("back"); return; }
-    if (parent && parent.isScrollContent && n.type === "container"){
+    if (parent && parent.isScrollContent && n.type === "container" && !n.children.some(function hot(c){ return /^操作\//.test(c.name || "") || c.children.some(hot); })){
       const tail = nm.split("/").pop();
       n.clickable = true; n.key = uniq("card" + pascal(camelKey(tail) || "Item"));
       markTexts(n, n.key); return;
@@ -1507,24 +1516,96 @@ function autoInteract(){
 /* 一键配动效:背景淡入 → 返回/标题淡入上移 → 卡片依次弹入(间隔 55ms)→ 进度条生长 → 按钮弹入;叠放在底板上的元素与底板同步出场 */
 function autoMotion(){
   walk(n => { n.motion = "none"; n.motionDelay = 0; });
-  const ordered = proj.nodes.map((n, i) => ({n, i})).sort((a, b) => (a.n.y - b.n.y) || (a.n.x - b.n.x) || (a.i - b.i)).map(o => o.n);
+  // 出场单元 = 页面顶层节点;名字不是背景的全屏纯分组(如 Figma 里的「PSD切图 · …」图层组)展开成里面的切图各自配(坐标换成页面坐标),背景分组仍整体淡入
+  const full = n => n.w >= STAGE_W * 0.9 && n.h >= STAGE_H * 0.9, units = [];
+  const expand = (list, ox, oy) => list.forEach(n => {
+    if (n.type === "container" && full(n) && n.children.length && !n.scroll && !n.clip && !n.clickable && !n.protoLink && !/background|^bg|背景|底图/i.test(n.name || "")) return expand(n.children, ox + n.x, oy + n.y);
+    units.push({n, x: ox + n.x, y: oy + n.y, w: n.w, h: n.h, i: units.length});
+  });
+  expand(proj.nodes, 0, 0);
+  const ordered = units.slice().sort((a, b) => (a.y - b.y) || (a.x - b.x) || (a.i - b.i));
+  // 卡片组:≥3 个同尺寸(±6px)的非文字元素排成一行或一列(奖励列、任务行、商品格)→ 按排列顺序依次弹入
+  const cardDelay = new Map(), inSet = new Set(), near = (a, b) => Math.abs(a - b) <= 6;
+  const cands = ordered.filter(u => u.n.type !== "text" && !u.n.isClose && !u.n.scroll && u.w >= 60 && u.h >= 60 && u.w < STAGE_W * 0.6 && u.h < STAGE_H * 0.8);
+  for (const u of cands){
+    if (inSet.has(u)) continue;
+    for (const row of [true, false]){
+      const set = cands.filter(v => !inSet.has(v) && near(v.w, u.w) && near(v.h, u.h) && (row ? near(v.y, u.y) : near(v.x, u.x)));
+      if (set.length < 3) continue;
+      set.sort((a, b) => row ? a.x - b.x : a.y - b.y).forEach((v, k) => { inSet.add(v); cardDelay.set(v, r4(0.2 + Math.min(k, 6) * 0.055)); });
+      break;
+    }
+  }
   const done = []; let rank = 0;
   const contains = (a, b) => b.x + b.w / 2 >= a.x && b.x + b.w / 2 <= a.x + a.w && b.y + b.h / 2 >= a.y && b.y + b.h / 2 <= a.y + a.h;
-  for (const n of ordered){
-    const nm = n.name;
-    if (n.w >= STAGE_W * 0.9 && n.h >= STAGE_H * 0.9){ n.motion = "fadeIn"; n.motionDelay = 0; continue; }       // 全屏背景
+  for (const u of ordered){
+    const n = u.n, nm = n.name;
+    if (full(u)){ n.motion = "fadeIn"; n.motionDelay = 0; continue; }       // 全屏背景
     if (n.isClose){ n.motion = "fadeIn"; n.motionDelay = 0.1; continue; }
     if (n.scroll){ const content = n.children.find(c => c.isScrollContent) || n.children[0];
       (content ? content.children : []).forEach((card, i) => { card.motion = "popIn"; card.motionDelay = r4(0.2 + Math.min(i, 4) * 0.055); }); continue; }
     if (/progress.*(fill|filled|bar)|进度.*(条|填充)/i.test(nm)){ n.motion = "growX"; n.motionDelay = 0.45; continue; }
     if (/spinner|loading|加载/i.test(nm)){ n.motion = "spin"; continue; }
     if (/popup|dialog|modal|弹窗/i.test(nm)){ n.motion = "popIn"; n.motionDelay = 0; continue; }
-    const plate = done.find(p => p.w < STAGE_W * 0.9 && !p.scroll && contains(p, n));
-    if (plate){ n.motion = plate.motion; n.motionDelay = plate.motionDelay; continue; }
+    if (cardDelay.has(u)){ n.motion = "popIn"; n.motionDelay = cardDelay.get(u); done.push(u); continue; }
+    // 叠在底板上的元素与底板同步出场;被几层底板叠着时跟最贴身的那层(卡片上的图标跟卡片,不跟整块面板)
+    const plate = done.filter(p => p.w < STAGE_W * 0.9 && !p.n.scroll && contains(p, u)).sort((a, b) => a.w * a.h - b.w * b.h)[0];
+    if (plate){ n.motion = plate.n.motion; n.motionDelay = plate.n.motionDelay; continue; }
     if ((n.clickable || n.type === "button") && n.type !== "text"){ n.motion = "popIn"; n.motionDelay = r4(Math.min(0.6, 0.3 + rank * 0.04)); }
     else { n.motion = "fadeUp"; n.motionDelay = r4(Math.min(0.6, 0.05 + rank * 0.05)); }
-    rank++; done.push(n);
+    rank++; done.push(u);
   }
+}
+/* 补认滚动区:Figma 里滚动框直接装着各行 / 各格(没有一层超出的内容容器)时,导入只当成裁剪框。
+   名称带「可滑动 / 可滚动 / 滚动 / scroll」、内容超出框的裁剪容器 → 包一层「内容」节点(位于 0,0)、设成滚动区;超出多的方向为滚动方向。
+   容器自带的「…/底」外观图留在框里不跟着滚。重复执行不变。返回补认的个数 */
+function promoteScrollAreas(nodes){
+  let made = 0;
+  walk(c => {
+    if (c.type !== "container" || c.scroll || !c.clip || c.isScrollContent || !/可滑动|可滚动|滚动|scroll/i.test(c.name || "")) return;
+    const items = c.children.filter(k => !/\/底$/.test(k.name || ""));
+    if (items.length < 2) return;
+    const right = Math.max(...items.map(k => k.x + k.w)), bottom = Math.max(...items.map(k => k.y + k.h));
+    const ovX = right - c.w, ovY = bottom - c.h, dir = ovY > 4 && ovY >= ovX ? "v" : ovX > 4 ? "h" : "";
+    if (!dir) return;
+    const padX = Math.max(0, Math.min(...items.map(k => k.x))), padY = Math.max(0, Math.min(...items.map(k => k.y)));
+    const w = dir === "h" ? right + padX : c.w, h = dir === "v" ? bottom + padY : c.h;
+    const content = {id: newId(), type: "container", name: "内容", children: items, anchor: dir === "h" ? "l" : "t", motion: "none", motionDelay: 0, x: 0, y: 0, w, h, isScrollContent: true, figma: {x: 0, y: 0, w, h}};
+    c.children = c.children.filter(k => !items.includes(k)).concat(content);
+    c.scroll = dir; delete c.clip; made++;
+  }, nodes);
+  return made;
+}
+/* 热区收拢:Figma 里「操作/<动作名>」是盖在按钮切图上的透明热区。把正下方、整块落在热区里的按钮切图(底图 / 文字 / 图标)收进热区当子节点,
+   这样进场弹入和按下缩放作用在看得见的按钮上,导出的 Unity 结构也是「按钮 + 子图」。只从纯分组里往外收(滚动区 / 裁剪 / 可点击分组里的不动);
+   收过一次后下面已经没有可收的,重复执行不变。返回收进去的节点数 */
+function groupHotspots(nodes){
+  const flat = [];
+  const rec = (list, ox, oy, parent, anc) => list.forEach(n => { const f = {n, ax: ox + n.x, ay: oy + n.y, parent, anc}; flat.push(f); rec(n.children, f.ax, f.ay, n, anc.concat(n)); });
+  rec(nodes, 0, 0, null, []);
+  const isHot = n => /^操作\//.test(n.name || "") && n.type !== "text" && !n.protoLink;
+  const pass = c => c.type === "container" && !c.scroll && !c.isScrollContent && !c.clip && !c.clickable && !c.protoLink && !isHot(c);
+  const taken = new Set(); let moved = 0;
+  flat.forEach((h, hi) => {
+    if (!isHot(h.n) || h.anc.some(a => taken.has(a)) || h.n.w * h.n.h <= 0) return;
+    const mx = Math.max(12, h.n.w * 0.15), my = Math.max(12, h.n.h * 0.15), grab = [];
+    for (let i = 0; i < hi; i++){
+      const v = flat[i], n = v.n;
+      if (h.anc.includes(n) || taken.has(n) || v.anc.some(a => taken.has(a) || isHot(a)) || isHot(n) || n.protoLink || n.hiddenByDefault || n.scroll || n.isScrollContent) continue;
+      if (n.w >= STAGE_W * 0.9 && n.h >= STAGE_H * 0.9) continue;
+      if (v.ax < h.ax - mx || v.ay < h.ay - my || v.ax + n.w > h.ax + h.n.w + mx || v.ay + n.h > h.ay + h.n.h + my || n.w * n.h > h.n.w * h.n.h * 1.3) continue;
+      let k = 0; while (k < v.anc.length && v.anc[k] === h.anc[k]) k++;   // 两者共同的祖先之外,v 往上的分组都必须是纯分组
+      if (!v.anc.slice(k).every(pass)) continue;
+      grab.push(v); taken.add(n);
+    }
+    grab.forEach(v => {
+      const list = v.parent ? v.parent.children : nodes, nx = v.ax - h.ax, ny = v.ay - h.ay;
+      list.splice(list.indexOf(v.n), 1);
+      if (v.n.figma) v.n.figma = Object.assign({}, v.n.figma, {x: v.n.figma.x + nx - v.n.x, y: v.n.figma.y + ny - v.n.y});
+      v.n.x = nx; v.n.y = ny; h.n.children.push(v.n); moved++;
+    });
+  });
+  return moved;
 }
 // 清掉自动识别写上的交互标记(按钮组件本身、初始隐藏等手动设置不动)
 // protoLink = Figma 原型带来的交互(交互组件的状态切换),不是自动识别配的,复位和重配都不动
@@ -1532,7 +1613,7 @@ function resetAuto(nodes){ walk(n => { if (n.protoLink) return; if (n.type !== "
 /* 一键配动效与交互。按钮:整个模块所有页面一起重配——先全部复位,再按页面顺序逐页识别(标识与整体导入时一致),最后重新连好页面跳转;
    silent(导入时):只配刚建好的当前页,某页切图全缺失时也不弹窗打断 */
 function autoConfigure(silent){
-  if (silent){ resetAuto(proj.nodes); if (countNodes()){ autoInteract(); autoMotion(); } return; }
+  if (silent){ resetAuto(proj.nodes); if (countNodes()){ promoteScrollAreas(proj.nodes); groupHotspots(proj.nodes); autoInteract(); autoMotion(); } return; }
   ensurePages();
   const pages = proj.pages.filter(p => p.nodes.length);
   if (!pages.length) return showMsg("画布是空的", "先从 Figma 拉取一个界面。");
@@ -2022,7 +2103,7 @@ const CLICK_PRESET_INDEX = {none:0, press:1, bounce:2, shake:3, flash:4};
 // 点击后的行为:目标节点存在时才生效,否则按「仅触发事件」处理
 function clickActionOf(b){
   const a = b.clickAction || "event";
-  if (a === "openPage" || a === "openPopup"){ const idx = (proj.pages || []).findIndex(p => p.id === b.clickTargetPage); return idx > 0 ? {act: a, target: null, pageIndex: idx, page: proj.pages[idx]} : {act: "event", target: null}; }
+  if (a === "openPage" || a === "switchPage" || a === "openPopup"){ const idx = (proj.pages || []).findIndex(p => p.id === b.clickTargetPage); return idx > 0 ? {act: a, target: null, pageIndex: idx, page: proj.pages[idx]} : {act: "event", target: null}; }
   if (a === "closePanel") return {act: a, target: null};
   const t = b.clickTarget ? findNodeAll(b.clickTarget) : null;
   if (a === "event" || !t) return {act: "event", target: null};
@@ -2610,6 +2691,7 @@ function genViewCs(mod, buttons, dynTexts){
       : act === "swap" ? `if (${b.key}Target != null) { ${b.key}Target.SetActive(true); ${b.key}Button.gameObject.SetActive(false); } `
       : act === "mask" ? `ToggleMask(${b.key}MaskText); `
       : act === "openPage" ? `OpenPage(${pageIndex}); `
+      : act === "switchPage" ? `SwitchPage(${pageIndex}); `
       : act === "openPopup" ? `OpenPopup(${pageIndex}); ` : "";
     const fire = act === "closePanel" ? `onAction.Invoke("${b.key}"); onCloseRequested.Invoke();` : b.isClose && act === "event" ? `Back();` : `onAction.Invoke("${b.key}");`;
     return `            if (${b.key}Button != null) ${b.key}Button.onClick.AddListener(() => { ${pre}${fire} });`;
@@ -2687,6 +2769,19 @@ ${wire || "            // 无按钮接线"}
             var from = pages[_stack[_stack.Count - 1]];
             _stack.Add(index);
             StartCoroutine(Transit(from, pages[index], 1));
+            onPageChanged.Invoke(pages[index].name);
+        }
+
+        /// <summary>切换页签:替换当前页(不进返回栈,Back 回到打开这组页签之前的页);当前在主页时等于 OpenPage。</summary>
+        public void SwitchPage(int index)
+        {
+            if (pages == null || index <= 0 || index >= pages.Length || pages[index] == null) return;
+            if (_stack.Count <= 1) { OpenPage(index); return; }
+            CloseTopPopupImmediate();
+            var from = pages[_stack[_stack.Count - 1]];
+            if (from == pages[index]) return;
+            _stack[_stack.Count - 1] = index;
+            StartCoroutine(Transit(from, pages[index], 0));
             onPageChanged.Invoke(pages[index].name);
         }
 
