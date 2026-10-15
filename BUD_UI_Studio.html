@@ -1068,6 +1068,7 @@ async function buildScreenFromFigma(frame, render, say, opts = {}){
       n.font = /montserrat/i.test(st.fontFamily || "") ? (w >= 800 ? "MontBlack" : w >= 600 ? "MontBold" : "MontMedium") : (w >= 600 ? "Heavy" : w >= 500 ? "Medium" : "Regular");
       n.alignH = {LEFT:0, CENTER:1, RIGHT:2, JUSTIFIED:0}[st.textAlignHorizontal] ?? 0;
       n.alignV = {TOP:0, CENTER:1, BOTTOM:2}[st.textAlignVertical] ?? 1;
+      if (singleLineBox(n)) n.alignV = 1;   // 见 centerSingleLine
       if (fill) n.textColor = rgb2hex(fill.color);
       n.alpha = r4((fill && fill.opacity != null ? fill.opacity : 1) * (c.opacity != null ? c.opacity : 1));
       return n;
@@ -1207,7 +1208,8 @@ async function importScreens(frames, render, opts){
   const [root, ...others] = proj.pages;   // 补充进来的页面排回弹窗前面:主页 → 页面 → 弹窗(页面序号导出时现算,调顺序不影响跳转)
   proj.pages = [root, ...others.filter(p => p.kind !== "popup"), ...others.filter(p => p.kind === "popup")];
   const popups = detectPopupVariants();   // 「同一屏 + 弹窗」的重复界面 → 弹窗页;重建模块时整体重配(标识与以后一键配动效一致),补充时只重配这几页
-  if (popups.length) reconfigurePages(opts.mode === "new" ? proj.pages.filter(p => p.nodes.length) : popups);
+  say("整理页面结构…"); await ensureOpaque();
+  if (opts.mode === "new" || popups.length) reconfigurePages(opts.mode === "new" ? proj.pages.filter(p => p.nodes.length) : popups);
   const links = autoLinkPages();
   proj.activePage = proj.pages[0].id; ensurePages();
   selId = null; renderAll(); fitStage(); autosave();
@@ -1688,11 +1690,14 @@ function promoteCardTrack(nodes){
     const all = groups.flatMap(g => [g.card].concat(g.items));
     // 轨道两端伸到钉住的列底下(左边如「福利总览」、右边如「50 级」),滑动时卡片从它们下面穿过,两侧不露缝
     const pinL = flat.slice(flat.indexOf(row[0]) + 1).filter(f => !row.includes(f) && f.n.type !== "text" && f.n.h >= row[0].n.h * 0.8 && f.ax < row[0].ax && f.ax + f.n.w >= row[0].ax - 40 && f.ay < row[0].ay + row[0].n.h && f.ay + f.n.h > row[0].ay).sort((a, b) => a.ax - b.ax)[0];
-    const coverL = Math.min(...covers.map(f => f.ax));
-    const left = pinL ? pinL.ax : row[0].ax, right = Math.max(...covers.map(f => f.ax + f.n.w)), top = Math.min(...all.map(f => f.ay)), bottom = Math.max(...all.map(f => f.ay + f.n.h));
+    // 裁剪边对齐两侧钉住列「看得见的」边(切图的透明留边 / 半透明阴影不算):不留缝,卡片也不会从列后面透出来
+    const coverEdges = covers.map(f => opqEdge(f.n, f.ax, "l")).filter(v => v != null);
+    if (!coverEdges.length) continue;
+    const coverL = Math.round(Math.min(...coverEdges)), pinR = pinL ? opqEdge(pinL.n, pinL.ax, "r") : null;
+    const left = pinR != null ? Math.round(pinR) : row[0].ax, right = coverL, top = Math.min(...all.map(f => f.ay)), bottom = Math.max(...all.map(f => f.ay + f.n.h));
     const host = row[0].parent, hostList = host ? host.children : nodes, hostF = host ? flat.find(f => f.n === host) : {ax: 0, ay: 0};
     const at = Math.min(...row.map(d => hostList.indexOf(d.n)).filter(i => i >= 0));   // 放在这排卡片最早画的位置,原来压在卡片上面的元素仍在上面
-    const cw = (right - left) + (last.ax + last.n.w - coverL) + 8, h = bottom - top;   // 能把最后一张拖到盖住它的列左边完整露出
+    const cw = (right - left) + Math.max(0, last.ax + last.n.w - coverL) + 8, h = bottom - top;   // 能把最后一张拖到盖住它的列左边完整露出   // 能把最后一张拖到盖住它的列左边完整露出
     const content = {id: newId(), type: "container", name: "内容", children: [], anchor: "l", motion: "none", motionDelay: 0, x: 0, y: 0, w: cw, h, isScrollContent: true, figma: {x: 0, y: 0, w: cw, h}};
     const track = {id: newId(), type: "container", name: "奖励列表 · 可滑动", cardTrack: true, children: [content], anchor: "c", motion: "none", motionDelay: 0, scroll: "h",
       x: left - hostF.ax, y: top - hostF.ay, w: right - left, h, figma: {x: left - hostF.ax, y: top - hostF.ay, w: right - left, h}};
@@ -1726,6 +1731,25 @@ function unwrapCardTracks(nodes){
     }
   });
 }
+/* 量高列切图(高 ≥ 200)水平方向的实色范围(alpha > 200,取 30% / 50% / 70% 高度三行),存 asset.opq = [左, 右, 图宽](全透明 = [-1, -1, 宽]);
+   切图常带透明留边 / 半透明阴影,奖励轨道的裁剪边要对齐看得见的列边。需要解码图片,所以在导入完成 / 一键配动效前异步量好;量不了(如 Node 里)就按外框 */
+async function ensureOpaque(){
+  const need = new Set(); walkAll(n => { if (n.type === "image" && n.spriteId && n.h >= 200 && proj.assets[n.spriteId] && !proj.assets[n.spriteId].opq) need.add(n.spriteId); });
+  for (const id of need){
+    try {
+      const a = proj.assets[id], bmp = await createImageBitmap(await (await fetch(a.dataUrl)).blob());
+      const c = document.createElement("canvas"); c.width = bmp.width; c.height = 1;
+      const g = c.getContext("2d", {willReadFrequently: true}); let l = -1, r = -1;
+      for (const fy of [0.3, 0.5, 0.7]){
+        g.clearRect(0, 0, c.width, 1); g.drawImage(bmp, 0, -Math.floor(bmp.height * fy));
+        const d = g.getImageData(0, 0, c.width, 1).data;
+        for (let x = 0; x < c.width; x++) if (d[x * 4 + 3] > 200){ if (l < 0 || x < l) l = x; if (x > r) r = x; }
+      }
+      a.opq = [l, r, bmp.width];
+    } catch (e) {}
+  }
+}
+const opqEdge = (n, ax, side) => { const a = proj.assets[n.spriteId], o = a && a.opq; if (!o) return side === "l" ? ax : ax + n.w; if (o[0] < 0) return null; return ax + n.w * (side === "l" ? o[0] : o[1] + 1) / o[2]; };
 /* 内容区:有左侧栏(贴左边、高 ≥ 60% 的窄条)的页面,把侧栏、左上角标题栏、返回以外的内容收进一个「内容区」节点,出场时整体从右侧滑入。
    页签组各页的内容区同名同位置,切页签时不重播(只有换掉的内容出场)。已有内容区就不再收。返回 1 / 0 */
 function buildContentArea(nodes){
@@ -1803,7 +1827,11 @@ function groupHotspots(nodes){
   return moved;
 }
 // 一键配置前整理页面结构(都可重复执行):补认滚动区 → 热区收拢按钮切图 → 奖励轨道改横向滚动 → 收内容区
-function tidyPage(nodes){ promoteScrollAreas(nodes); groupHotspots(nodes); promoteCardTrack(nodes); buildContentArea(nodes); buildRadioTabs(nodes); }
+// 单行、盒子高度与字号相当的文字(Figma 里自动高度,字形在盒子里本来就是居中的)顶对齐时,工作台 / Unity 的行高比 Figma 大,字会往下沉几像素、
+// 和底图(等级底、状态底、按钮)对不齐 → 统一上下居中。多行文字不动
+function singleLineBox(n){ return n.type === "text" && n.alignV === 0 && !String(n.text || "").includes("\n") && n.h <= n.fontSize * 1.8; }
+function centerSingleLine(nodes){ walk(n => { if (singleLineBox(n)) n.alignV = 1; }, nodes); }
+function tidyPage(nodes){ centerSingleLine(nodes); promoteScrollAreas(nodes); groupHotspots(nodes); promoteCardTrack(nodes); buildContentArea(nodes); buildRadioTabs(nodes); }
 /* 单选页签:同一分组里 ≥3 个同尺寸(±4px)的「操作/…」热区,各自底图(里面面积最大的切图)只有一个与其余不同 → 那个是选中态。
    每个页签的内容拆成「常态」「选中态」两层(缺的那层照着选中项 / 普通项复制:底图换成对方的、文字颜色字体取对方同序号的文字),只显示当前那层;
    点击后由 autoLinkPages 设为「单选页签」(clickAction radio,同组 n.radio 相同)。页签名等于某页核心名的(页面级页签)不处理。已拆过的不再拆 */
@@ -1851,6 +1879,12 @@ function resetAuto(nodes){ walk(n => { if (n.protoLink) return; if (n.type !== "
    silent(导入时):只配刚建好的当前页,某页切图全缺失时也不弹窗打断 */
 function autoConfigure(silent){
   if (silent){ resetAuto(proj.nodes); if (countNodes()){ tidyPage(proj.nodes); autoInteract(); autoMotion(); } return; }
+  // 有没量过的高列切图才异步量一次再配;没有(或环境不能解码图片,如离线体检)就直接同步配
+  let need = false; walkAll(n => { if (n.type === "image" && n.spriteId && n.h >= 200 && proj.assets[n.spriteId] && !proj.assets[n.spriteId].opq) need = true; });
+  if (!need || typeof createImageBitmap !== "function") return autoConfigureAll();
+  return ensureOpaque().then(() => autoConfigureAll());
+}
+function autoConfigureAll(){
   ensurePages();
   const pages = proj.pages.filter(p => p.nodes.length);
   if (!pages.length) return showMsg("画布是空的", "先从 Figma 拉取一个界面。");
