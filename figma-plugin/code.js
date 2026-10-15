@@ -76,6 +76,11 @@ function ser(node, idMap) {
   if ("absoluteRenderBounds" in node) o.absoluteRenderBounds = box(node.absoluteRenderBounds);
   if ("opacity" in node) o.opacity = node.opacity;
   if ("clipsContent" in node) o.clipsContent = !!node.clipsContent;
+  // 圆角(裁剪框按圆角裁,工作台据此显示),字段名与 REST 一致:cornerRadius / rectangleCornerRadii[左上, 右上, 右下, 左下]
+  if ("cornerRadius" in node) {
+    if (node.cornerRadius !== figma.mixed) { if (node.cornerRadius > 0) o.cornerRadius = node.cornerRadius; }
+    else if ("topLeftRadius" in node) o.rectangleCornerRadii = [node.topLeftRadius, node.topRightRadius, node.bottomRightRadius, node.bottomLeftRadius];
+  }
   if ("strokes" in node) o.strokes = paints(node.strokes);
   if ("effects" in node && node.effects !== figma.mixed) {
     o.effects = node.effects.map(function (e) { return { type: e.type, visible: e.visible !== false }; });

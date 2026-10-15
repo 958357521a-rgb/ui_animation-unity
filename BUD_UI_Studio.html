@@ -404,6 +404,9 @@ function renderStage(){
     if (selId && within(n, selId)) { stateEdit.add(n.id); stateHide.add(partner.id); }
     else stateHide.add(n.id);
   });
+  walkAll(n => { if (!n.radio) return; n.children.forEach(c => {   // 单选页签的两层:编辑时只显示当前那层;选中了隐藏层里的节点时显示它
+    if (!c.hiddenByDefault) return; const other = n.children.find(o => o !== c);
+    if (selId && within(c, selId)) { stateEdit.add(c.id); if (other) stateHide.add(other.id); } else stateHide.add(c.id); }); });
   const make = (n, parentEl, px, py)=>{
     const el = document.createElement("div");
     el.className = "node" + (n.id===selId?" sel":"") + (n.type==="button"?" btnNode":"") + (n.motion!=="none" && !(playSwitching && n.skipOnSwitch && n.motion!=="breathe" && n.motion!=="spin")?` m-${n.motion}`:"") + (isKeepOld(n)?" keepOld":"");
@@ -419,6 +422,7 @@ function renderStage(){
     }
     if (n.type==="container" && n.id!==selId) el.style.outline = "1px dashed #5a5a6a";
     if (n.clip || n.scroll) el.style.overflow = "hidden";
+    if ((n.clip || n.scroll) && n.radius) el.style.borderRadius = n.radius.map(v => v + "px").join(" ");   // Figma 圆角裁剪框(左上 右上 右下 左下)
     if (n.clickable) el.style.cursor = "pointer";
     if (n.hiddenByDefault && !playing && !stateEdit.has(n.id)) el.style.opacity = "0.4";
     if (!playing && stateHide.has(n.id)) el.style.display = "none";
@@ -500,6 +504,8 @@ function renderInsp(){
       const others = (proj.pages || []).filter(p => p.id !== proj.activePage && (n.clickAction === "openPopup" ? p.kind === "popup" : p.kind !== "popup"));
       h += row("目标页面", `<select onchange="setProp('clickTargetPage',this.value||null)"><option value="">(请选择)</option>${others.map(p=>`<option value="${p.id}" ${n.clickTargetPage===p.id?"selected":""}>${escHtml(p.name)}</option>`).join("")}</select>`);
       if (!others.length) h += `<div class="row" style="color:var(--dim)">还没有可跳转的${n.clickAction === "openPopup" ? "弹窗" : "页面"},先在左侧「＋加页面」</div>`;
+    } else if (n.clickAction === "radio"){
+      h += `<div class="row" style="color:var(--dim)">${n.radio ? "点击后显示自己的「选中态」、同组其他页签显示「常态」,再抛出 onAction(事件标识)" : "这个元素不是单选页签(没有「常态 / 选中态」两层),按「仅触发事件」处理"}</div>`;
     } else if (n.clickAction === "closePanel"){
       h += `<div class="row" style="color:var(--dim)">先抛出 onAction(事件标识),再关闭整个面板(不论当前在哪一页/弹窗),主工程里 = CloseSelf()</div>`;
     } else if ((n.clickAction||"event") !== "event"){
@@ -695,7 +701,7 @@ function playPreview(){ stage.classList.remove("previewing"); void stage.offsetW
 
 /* ================= 试玩模式:像真机一样点按钮、拖滚动区,日志显示程序会收到的回调 ================= */
 const CLICK_MOTIONS = {press:"按下缩放", bounce:"点击弹跳", shake:"点击抖动", flash:"点击闪烁", none:"无"};
-const CLICK_ACTIONS = {event:"仅触发事件", closePanel:"关闭整个面板", openPage:"打开页面", switchPage:"切换页签(替换当前页,不进返回栈)", openPopup:"打开弹窗", toggle:"切换显示/隐藏", show:"显示节点", hide:"隐藏节点", swap:"切换到(显示目标、隐藏自己)", mask:"切换数字遮罩(***)"};
+const CLICK_ACTIONS = {event:"仅触发事件", closePanel:"关闭整个面板", openPage:"打开页面", switchPage:"切换页签(替换当前页,不进返回栈)", openPopup:"打开弹窗", toggle:"切换显示/隐藏", show:"显示节点", hide:"隐藏节点", swap:"切换到(显示目标、隐藏自己)", mask:"切换数字遮罩(***)", radio:"单选页签(选中自己、同组其他取消)"};
 let playing = false, elById = {};
 let playState = {hidden:{}, masked:{}, offset:{}};
 let playNav = {stack: [], popup: null}, playLayers = {base: null, popup: null}, playSwitching = false;
@@ -794,6 +800,12 @@ function playClick(n, el){
       if (act === "openPage") playOpenPage(pg.id); else if (act === "switchPage") playSwitchPage(pg.id); else playOpenPopup(pg.id);
       return;
     }
+  }
+  if (act === "radio" && n.radio){   // 单选页签:自己显示「选中态」,同组其他显示「常态」
+    walkAll(m => { if (m.radio !== n.radio) return; const on = m.children.find(c => c.name === "选中态"), off = m.children.find(c => c.name === "常态"); if (!on || !off) return;
+      const pick = m === n; playState.hidden[on.id] = !pick; playState.hidden[off.id] = pick;
+      if (elById[on.id]) elById[on.id].style.display = pick ? "" : "none"; if (elById[off.id]) elById[off.id].style.display = pick ? "none" : ""; });
+    note = ` · 选中「${escHtml(String(n.name).replace("操作/", ""))}」`;
   }
   if (target && act === "swap"){   // 显示目标 + 隐藏被点击的节点自己
     playState.hidden[target.id] = false; playState.hidden[n.id] = true;
@@ -1018,6 +1030,7 @@ function planScreen(frame, kind){
         const wide = item.children.find(k => k.kind === "container" && (k.rect.w > item.rect.w + 4 || k.rect.h > item.rect.h + 4));
         if (c.clipsContent && wide){ item.scroll = wide.rect.w > item.rect.w + 4 ? "h" : "v"; item.scrollContent = wide; stats.scroll++; }
         else if (c.clipsContent) item.clip = true;
+        if (c.clipsContent){ const r = c.rectangleCornerRadii || (c.cornerRadius ? [c.cornerRadius, c.cornerRadius, c.cornerRadius, c.cornerRadius] : null); if (r && r.some(v => v > 0)) item.radius = r.map(v => Math.round(v * scale)); }
         out.push(withVariants(c, item, rel(box))); stats.container++; continue;
       }
       out.push(withVariants(c, {kind:"image", src:c, rect:rel(c.absoluteRenderBounds || box)}, rel(box))); renderIds.push(c.id);
@@ -1073,7 +1086,7 @@ async function buildScreenFromFigma(frame, render, say, opts = {}){
     }
     if (item.kind === "container"){
       const n = addNode("container", parent, true); Object.assign(n, item.rect); n.figma = Object.assign({}, item.rect); n.name = c.name.slice(0, 32);
-      if (item.scroll) n.scroll = item.scroll; if (item.clip) n.clip = true;
+      if (item.scroll) n.scroll = item.scroll; if (item.clip) n.clip = true; if (item.radius) n.radius = item.radius;
       if (item.bg && rendered[item.bg.id]){   // 插件导出的容器自身外观(底色/描边/投影),作为最底层的装饰图
         const aid = "a" + Date.now() + Math.floor(Math.random() * 1e6);
         proj.assets[aid] = {name: assetName(c.name + "_bg"), dataUrl: rendered[item.bg.id], w: item.bg.rect.w, h: item.bg.rect.h};
@@ -1347,7 +1360,7 @@ const PAGE_WORDS = [["圣天使之翼","wing"],["福利规则","rules"],["奖励
 function pageSlug(name){ let t = String(name).split("/")[0]; PAGE_WORDS.forEach(([cn, en]) => { t = t.split(cn).join(" " + en + " "); }); return camelKey(t) || "page"; }
 
 // 页面核心名:去掉开头「NN · 」和结尾「 · 分层拼装」
-const pageCore = p => String((p && p.name) || "").replace(/^\s*\d+\s*[·.\-、]\s*/, "").replace(/\s*·\s*分层拼装\s*$/, "").trim();
+const pageCore = p => String((p && p.name) || "").replace(/^\s*\d+[a-zA-Z]?\s*[·.\-、]\s*/, "").replace(/\s*·\s*分层拼装\s*$/, "").trim();
 const POPUP_HINT = /获取途径|图标名称|限购次数|当前拥有/;
 /* 弹窗变体:设计稿里「同一屏 + 弹窗」会画成两张几乎一样的界面(核心名/名字相同),后一张比前一张多出一个全屏遮罩和一个对话框。
    把后一张改成弹窗页,只留多出来的图层(与前一张重复的图层丢弃)。幂等:已经是弹窗的不再处理。返回被改成弹窗的页面 */
@@ -1430,6 +1443,8 @@ function autoLinkPages(onlyPage){
   // ---- 按名字连:动作名(「操作/<动作名>」去掉前缀,或按钮文字)对页面核心名。优先级:等于核心名 → 互相包含(取核心名最短的页)→ 页签组 → 「预览…」开弹窗;都不匹配保持现状 ----
   // 页签组:一组页面(≥2 页)每页都有一组与这些页核心名一一对应的可点元素;组内页签互相 openPage,组外连到组内任一页的按钮一律连到组里第一页
   // 连到主页(第 0 页)没有 OpenPage(0):按「返回」处理(isClose,Back 回到栈底的主页)
+  const agg = new Map(), unl = new Set(); let named = 0;
+  const note = (pg, act, label) => { const k = pg.name + "\u0001" + act + "\u0001" + label; agg.set(k, (agg.get(k) || 0) + 1); named++; };
   const cjk = s => (String(s).match(/[\u4e00-\u9fff]/g) || []).length;
   const synAct = s => String(s).replace(/购买|开通/g, "解锁");   // 「购买通行证」按钮对「解锁通行证」页
   const opName = n => { const m = String(n.name || "").match(/^操作\/(.+)$/); if (m) return m[1].trim(); if (n.type === "button") return String(n.label || "").trim(); const t = textOf(n).trim(); return cjk(t) >= 2 && t.length <= 12 ? t : ""; };
@@ -1444,9 +1459,63 @@ function autoLinkPages(onlyPage){
   });
   // 页签组各页共用的部分(同名、同位置)切页签时不重播进场动效;滚动区里的内容照常出场(换的就是它);内容区各页范围不同,按名字算共用
   const sigs = pg => { const out = new Map(); const rec = (list, ox, oy, inScroll) => list.forEach(n => { const ax = ox + n.x, ay = oy + n.y; out.set(n, inScroll ? "" : n.contentArea ? "@内容区" : [n.name, n.type, ax, ay, n.w, n.h].join("|")); rec(n.children, ax, ay, inScroll || !!n.isScrollContent); }); rec(pg.nodes, 0, 0, false); return out; };
+  const sigsAll = pg => { const out = new Map(); const rec = (list, ox, oy) => list.forEach(n => { const ax = ox + n.x, ay = oy + n.y; out.set(n, n.contentArea ? "@内容区" : [n.name, n.type, ax, ay, n.w, n.h].join("|")); rec(n.children, ax, ay); }); rec(pg.nodes, 0, 0); return out; };
   groups.forEach(g => g.filter(inScope).forEach(pg => {
     const others = new Set(); g.forEach(q => { if (q !== pg) sigs(q).forEach(v => { if (v) others.add(v); }); });
     sigs(pg).forEach((v, n) => { if (v && others.has(v)) n.skipOnSwitch = true; else delete n.skipOnSwitch; });
+  }));
+  // ---- 状态稿:「06b · …」(编号 = 底页编号 + 字母)或核心名以底页核心名 +「 · 」开头的页,是底页的另一个状态(选中某项、展开预览面板…) ----
+  // 底页里被状态稿改动 / 盖住的热区(及同排同尺寸的兄弟热区)→ 切到该状态稿;在状态稿里再点那个选中项 → 切回底页。瞬间换页,共用部分不重播
+  const scrNo = p => String(p.name || "").match(/^\s*(\d+)([a-zA-Z]?)\s*[·.\-、]/) || [];
+  const baseOf = new Map();
+  pagesOnly.forEach(b => {
+    const [, num, suf] = scrNo(b), cb = pageCore(b);
+    const cand = pagesOnly.filter(a => a !== b && !scrNo(a)[2] && ((num && suf && scrNo(a)[1] === num) || cb.startsWith(pageCore(a) + " · ")));
+    cand.sort((x, y) => pageCore(y).length - pageCore(x).length);
+    if (cand[0]) baseOf.set(b, cand[0]);
+  });
+  const families = new Map(); baseOf.forEach((a, b) => { if (!families.has(a)) families.set(a, [a]); families.get(a).push(b); });
+  const familyOf = p => families.get(baseOf.get(p) || p) || null;
+  const nameTargets = pagesOnly.filter(p => !baseOf.has(p));
+  const hotN = n => String(n.name || "").startsWith("操作/") && n.type !== "text";
+  const absOf = pg => { const m = new Map(); const rec = (l, ox, oy, par, hid) => l.forEach(n => { const ax = ox + n.x, ay = oy + n.y, h = hid || !!n.hiddenByDefault; m.set(n, {ax, ay, par, hid: h}); rec(n.children, ax, ay, n, h); }); rec(pg.nodes, 0, 0, null, false); return m; };
+  const posKey = (n, p) => n.name + "|" + p.ax + "," + p.ay + "," + n.w + "x" + n.h;
+  const lookOf = n => JSON.stringify(n, function (k, v){ return k === "children" && this.radio ? v.filter(c => !c.hiddenByDefault) : ["id", "figma", "key", "motion", "motionDelay", "skipOnSwitch", "clickAction", "clickTargetPage", "clickTarget", "clickMotion", "clickable", "isClose", "dynamic", "radio"].includes(k) ? undefined
+    : k === "spriteId" ? (proj.assets[v] ? proj.assets[v].dataUrl.length + ":" + proj.assets[v].dataUrl.slice(-48) : "") : v; });   // 单选页签只比显示着的那层
+  const stateTo = new Map(), selIn = new Map();   // 底页热区 posKey → 状态稿;状态稿 → 它里面「选中的」热区 posKey
+  families.forEach(fam => {
+    const A = fam[0], mA = absOf(A), keyA = new Map(); mA.forEach((p, n) => keyA.set(posKey(n, p), n));
+    fam.slice(1).forEach(V => {
+      const mV = absOf(V), keyV = new Map(); mV.forEach((p, n) => keyV.set(posKey(n, p), n));
+      const inOldHot = n => { for (let q = mV.get(n).par; q; q = mV.get(q).par) if (hotN(q) && keyA.has(posKey(q, mV.get(q)))) return true; return false; };   // 底页也有的热区里面的变化算「内容变了」,不算新出现
+      const onlyV = [...mV].filter(([n, p]) => !p.hid && !keyA.has(posKey(n, p)) && !inOldHot(n));   // 状态稿里新出现的节点(提示气泡、选中框、预览面板…)
+      const trig = [];
+      mA.forEach((p, h) => {
+        if (!hotN(h)) return;
+        const k = posKey(h, p), hv = keyV.get(k);
+        const changed = hv && lookOf(hv) !== lookOf(h);
+        const covered = onlyV.some(([o, q]) => { const ix = Math.min(q.ax + o.w, p.ax + h.w) - Math.max(q.ax, p.ax), iy = Math.min(q.ay + o.h, p.ay + h.h) - Math.max(q.ay, p.ay);
+          return ix > 0 && iy > 0 && ix * iy >= 0.6 * o.w * o.h && o.w * o.h <= h.w * h.h * 2.5 && o.w * o.h >= h.w * h.h * 0.4; });   // 新元素大部分落在热区上(如部件选中框),不是旁边弹出的气泡
+        if (changed || covered) trig.push({h, back: covered || (hv && hv.radio && hv.children.some(c => c.name === "选中态" && !c.hiddenByDefault))});
+      });
+      // 只认列表项(同一分组里 ≥3 个同前缀同尺寸的热区);状态稿里「选中」的那项再点回到底页
+      const pre = h => (String(h.name).replace("操作/", "").match(/^\S{2}/) || [""])[0];
+      const sibsOf = h => { const p = mA.get(h); return (p.par ? p.par.children : A.nodes).filter(x => hotN(x) && pre(x) === pre(h) && Math.abs(x.w - h.w) <= 4 && Math.abs(x.h - h.h) <= 4); };
+      const items = trig.filter(t => sibsOf(t.h).length >= 3);
+      if (!items.length) return;
+      selIn.set(V, new Set(items.filter(t => t.back).map(t => posKey(t.h, mA.get(t.h)))));
+      items.forEach(t => sibsOf(t.h).forEach(x => { const k = posKey(x, mA.get(x)); if (!stateTo.has(k)) stateTo.set(k, V); }));
+    });
+  });
+  families.forEach(fam => fam.filter(inScope).forEach(P => {
+    const A = fam[0], mP = absOf(P);
+    mP.forEach((p, n) => {
+      if (!hotN(n) || !free(n) || n.isClose) return;
+      const k = posKey(n, p), V = stateTo.get(k);
+      let t = V && V !== P ? V : (selIn.get(P) && selIn.get(P).has(k) ? A : null);
+      if (!t || t === P) return;
+      n.clickAction = "switchPage"; n.clickTargetPage = t.id; note(P, opName(n) || n.name, (t === A ? "回到「" : "状态「") + t.name + "」");
+    });
   }));
   const popupFor = pg => {   // 当前页核心名(或它的前缀)对应的弹窗页:弹窗变体的底页核心名等于它、或以它开头
     const c = pageCore(pg);
@@ -1454,17 +1523,16 @@ function autoLinkPages(onlyPage){
     cand.sort((a, b) => ((a.bc === c) ? 0 : 1) - ((b.bc === c) ? 0 : 1) || a.bc.length - b.bc.length);
     return cand.length ? cand[0].pp : null;
   };
-  const agg = new Map(), unl = new Set(); let named = 0;
-  const note = (pg, act, label) => { const k = pg.name + "\u0001" + act + "\u0001" + label; agg.set(k, (agg.get(k) || 0) + 1); named++; };
   proj.pages.filter(inScope).forEach(pg => walk(n => {
     if (!free(n) || n.isClose || n.protoLink) return;
     const act = opName(n); if (!act) return;
     const na = synAct(act);
-    let t = pagesOnly.find(q => synAct(pageCore(q)) === na) || null;
+    let t = nameTargets.find(q => synAct(pageCore(q)) === na) || null;
     if (!t && cjk(act) >= 2){
-      const c = pagesOnly.filter(q => cjk(pageCore(q)) >= 2 && (na.includes(synAct(pageCore(q))) || synAct(pageCore(q)).includes(na))).sort((a, b) => pageCore(a).length - pageCore(b).length);
+      const c = nameTargets.filter(q => cjk(pageCore(q)) >= 2 && (na.includes(synAct(pageCore(q))) || synAct(pageCore(q)).includes(na))).sort((a, b) => pageCore(a).length - pageCore(b).length);
       t = c[0] || null;
     }
+    if (t && familyOf(pg) && familyOf(pg).includes(t)) t = null;
     if (t){
       const g = groups.find(x => x.includes(t)), inGroup = !!g && g.includes(pg); if (g && !inGroup) t = g[0];
       if (t === pg) return;   // 就是当前页(页签高亮的那一项),不用连
@@ -1479,6 +1547,12 @@ function autoLinkPages(onlyPage){
     }
     if (/^操作\//.test(n.name || "")) unl.add(act);
   }, pg.nodes));
+  families.forEach(fam => fam.filter(inScope).forEach(pg => {
+    const others = new Set(); fam.forEach(q => { if (q !== pg) sigsAll(q).forEach(v => others.add(v)); });
+    sigsAll(pg).forEach((v, n) => { if (others.has(v)) n.skipOnSwitch = true; });
+  }));
+  // 单选页签(tidyPage 已补好「常态 / 选中态」两层):没连到页面的就点谁选中谁
+  proj.pages.filter(inScope).forEach(pg => walk(n => { if (n.radio && free(n) && !n.isClose) n.clickAction = "radio"; }, pg.nodes));
   const direct = links.length;
   agg.forEach((cnt, k) => { const [pn, act, label] = k.split("\u0001"); links.push("「" + pn + "」的「" + act + "」" + (cnt > 1 ? " ×" + cnt : "") + " → " + label); });
   links.total = direct + named; links.named = named; links.unlinked = [...unl];
@@ -1610,10 +1684,13 @@ function promoteCardTrack(nodes){
     const groups = row.map(card => ({card, items: flat.filter(f => f !== card && !row.includes(f) && free(f) && !taken.has(f.n) && !f.anc.some(a => taken.has(a)) && f.n.w <= card.n.w * 1.2 && f.n.h <= card.n.h * 1.2 && inside(f, card))}));
     groups.forEach(g => { taken.add(g.card.n); g.items.forEach(f => taken.add(f.n)); });
     const all = groups.flatMap(g => [g.card].concat(g.items));
-    const left = row[0].ax, right = Math.min(...covers.map(f => f.ax)), top = Math.min(...all.map(f => f.ay)), bottom = Math.max(...all.map(f => f.ay + f.n.h));
+    // 轨道两端伸到钉住的列底下(左边如「福利总览」、右边如「50 级」),滑动时卡片从它们下面穿过,两侧不露缝
+    const pinL = flat.slice(flat.indexOf(row[0]) + 1).filter(f => !row.includes(f) && f.n.type !== "text" && f.n.h >= row[0].n.h * 0.8 && f.ax < row[0].ax && f.ax + f.n.w >= row[0].ax - 40 && f.ay < row[0].ay + row[0].n.h && f.ay + f.n.h > row[0].ay).sort((a, b) => a.ax - b.ax)[0];
+    const coverL = Math.min(...covers.map(f => f.ax));
+    const left = pinL ? pinL.ax : row[0].ax, right = Math.max(...covers.map(f => f.ax + f.n.w)), top = Math.min(...all.map(f => f.ay)), bottom = Math.max(...all.map(f => f.ay + f.n.h));
     const host = row[0].parent, hostList = host ? host.children : nodes, hostF = host ? flat.find(f => f.n === host) : {ax: 0, ay: 0};
     const at = Math.min(...row.map(d => hostList.indexOf(d.n)).filter(i => i >= 0));   // 放在这排卡片最早画的位置,原来压在卡片上面的元素仍在上面
-    const cw = last.ax + last.n.w - left + 8, h = bottom - top;
+    const cw = (right - left) + (last.ax + last.n.w - coverL) + 8, h = bottom - top;   // 能把最后一张拖到盖住它的列左边完整露出
     const content = {id: newId(), type: "container", name: "内容", children: [], anchor: "l", motion: "none", motionDelay: 0, x: 0, y: 0, w: cw, h, isScrollContent: true, figma: {x: 0, y: 0, w: cw, h}};
     const track = {id: newId(), type: "container", name: "奖励列表 · 可滑动", children: [content], anchor: "c", motion: "none", motionDelay: 0, scroll: "h",
       x: left - hostF.ax, y: top - hostF.ay, w: right - left, h, figma: {x: left - hostF.ax, y: top - hostF.ay, w: right - left, h}};
@@ -1704,7 +1781,47 @@ function groupHotspots(nodes){
   return moved;
 }
 // 一键配置前整理页面结构(都可重复执行):补认滚动区 → 热区收拢按钮切图 → 奖励轨道改横向滚动 → 收内容区
-function tidyPage(nodes){ promoteScrollAreas(nodes); groupHotspots(nodes); promoteCardTrack(nodes); buildContentArea(nodes); }
+function tidyPage(nodes){ promoteScrollAreas(nodes); groupHotspots(nodes); promoteCardTrack(nodes); buildContentArea(nodes); buildRadioTabs(nodes); }
+/* 单选页签:同一分组里 ≥3 个同尺寸(±4px)的「操作/…」热区,各自底图(里面面积最大的切图)只有一个与其余不同 → 那个是选中态。
+   每个页签的内容拆成「常态」「选中态」两层(缺的那层照着选中项 / 普通项复制:底图换成对方的、文字颜色字体取对方同序号的文字),只显示当前那层;
+   点击后由 autoLinkPages 设为「单选页签」(clickAction radio,同组 n.radio 相同)。页签名等于某页核心名的(页面级页签)不处理。已拆过的不再拆 */
+function buildRadioTabs(nodes){
+  const hot = n => String(n.name || "").startsWith("操作/") && n.type !== "text";
+  const cores = new Set((proj.pages || []).map(pageCore));
+  const look = m => { const a = proj.assets[m.spriteId]; return a ? a.dataUrl.length + ":" + a.dataUrl.slice(-48) : ""; };
+  const bgOf = t => { let best = null, bx = 0, by = 0; const rec = (l, ox, oy) => l.forEach(m => { const ax = ox + m.x, ay = oy + m.y; if (m.type === "image" && m.spriteId && (!best || m.w * m.h > best.w * best.h)){ best = m; bx = ax; by = ay; } rec(m.children, ax, ay); }); rec(t.children, 0, 0); return best ? {m: best, x: bx, y: by} : null; };
+  const texts = t => { const out = []; walk(m => { if (m.type === "text") out.push(m); }, t.children); return out; };
+  const reid = m => { m.id = newId(); m.children.forEach(reid); return m; };
+  const copyAs = (t, bgSrc, txtSrc) => {   // 复制 t 的内容,底图换成 bgSrc 的,文字样式取 txtSrc 同序号的
+    const kids = t.children.map(c => reid(JSON.parse(JSON.stringify(c)))), my = bgOf({children: kids}), tt = texts({children: kids}), st = texts(txtSrc);
+    if (my && bgSrc){ my.m.spriteId = bgSrc.m.spriteId; my.m.x += bgSrc.x - my.x; my.m.y += bgSrc.y - my.y; my.m.w = bgSrc.m.w; my.m.h = bgSrc.m.h; }
+    tt.forEach((m, i) => { const o = st[i]; if (o){ m.textColor = o.textColor; m.font = o.font; } });
+    return kids;
+  };
+  const lists = [nodes]; walk(n => { if (n.children.length) lists.push(n.children); }, nodes);
+  let gid = 0, made = 0;
+  lists.forEach(list => {
+    const cand = list.filter(n => hot(n) && n.children.length && !n.radio && !cores.has(String(n.name).replace("操作/", "").trim()) && bgOf(n));
+    const used = new Set();
+    cand.forEach(c => {
+      if (used.has(c)) return;
+      const g = cand.filter(d => !used.has(d) && Math.abs(d.w - c.w) <= 4 && Math.abs(d.h - c.h) <= 4);
+      if (g.length < 3) return;
+      const looks = g.map(t => look(bgOf(t).m)), count = {}; looks.forEach(l => count[l] = (count[l] || 0) + 1);
+      const odd = g.filter((t, i) => count[looks[i]] === 1);
+      if (odd.length !== 1 || Object.keys(count).length !== 2) return;
+      g.forEach(d => used.add(d));
+      const S = odd[0], R = g.find(t => t !== S), sBg = bgOf(S), rBg = bgOf(R), key = "rg" + S.id + "_" + (gid++);
+      g.forEach(t => {
+        const sel = t === S ? t.children : copyAs(t, sBg, S), norm = t === S ? copyAs(t, rBg, R) : t.children;
+        const box = (name, kids, hidden) => ({id: newId(), type: "container", name, children: kids, anchor: "c", motion: "none", motionDelay: 0, x: 0, y: 0, w: t.w, h: t.h, figma: {x: 0, y: 0, w: t.w, h: t.h}, hiddenByDefault: hidden});
+        t.children = [box("常态", norm, t === S), box("选中态", sel, t !== S)]; t.radio = key;
+      });
+      made++;
+    });
+  });
+  return made;
+}
 // 清掉自动识别写上的交互标记(按钮组件本身、初始隐藏等手动设置不动)
 // protoLink = Figma 原型带来的交互(交互组件的状态切换),不是自动识别配的,复位和重配都不动
 function resetAuto(nodes){ walk(n => { if (n.protoLink) return; if (n.type !== "button"){ n.clickable = false; n.isClose = false; } if (n.type === "text") n.dynamic = false; delete n.clickMotion; delete n.clickAction; delete n.clickTarget; delete n.clickTargetPage; delete n.skipOnSwitch; }, nodes); }
@@ -2203,6 +2320,7 @@ function clickActionOf(b){
   const a = b.clickAction || "event";
   if (a === "openPage" || a === "switchPage" || a === "openPopup"){ const idx = (proj.pages || []).findIndex(p => p.id === b.clickTargetPage); return idx > 0 ? {act: a, target: null, pageIndex: idx, page: proj.pages[idx]} : {act: "event", target: null}; }
   if (a === "closePanel") return {act: a, target: null};
+  if (a === "radio"){ const on = b.radio && b.children.find(c => c.name === "选中态"), off = b.radio && b.children.find(c => c.name === "常态"); return on && off ? {act: a, target: null, on, off} : {act: "event", target: null}; }
   const t = b.clickTarget ? findNodeAll(b.clickTarget) : null;
   if (a === "event" || !t) return {act: "event", target: null};
   if (a === "mask" && t.type !== "text") return {act: "event", target: null};
@@ -2641,6 +2759,7 @@ function genPrefab(mod, usedAssets, guids, buttons, dynTexts, ids = {}){
     let s = `  ${b.key}Button: {fileID: ${fieldRefs.buttons[b.key]}}`;
     if (act === "mask") s += `\n  ${b.key}MaskText: {fileID: ${nodeFids[target.id].text}}`;
     else if (act === "toggle" || act === "show" || act === "hide" || act === "swap") s += `\n  ${b.key}Target: {fileID: ${nodeFids[target.id].go}}`;
+    else if (act === "radio"){ const {on, off} = clickActionOf(b); s += `\n  ${b.key}On: {fileID: ${nodeFids[on.id].go}}\n  ${b.key}Off: {fileID: ${nodeFids[off.id].go}}`; }
     return s;
   }).join("\n");
   const txtFields = dynTexts.map(t=>`  ${t.key}Text: {fileID: ${fieldRefs.texts[t.key]}}`).join("\n");
@@ -2778,9 +2897,20 @@ function genViewCs(mod, buttons, dynTexts){
     let s = `        [SerializeField] private Button ${b.key}Button;   // ${b.name}`;
     if (act === "mask") s += `\n        [SerializeField] private Text ${b.key}MaskText;   // 点击切换 *** 遮罩:${target.name}`;
     else if (act === "toggle" || act === "show" || act === "hide" || act === "swap") s += `\n        [SerializeField] private GameObject ${b.key}Target;   // 点击${CLICK_ACTIONS[act]}:${target.name}`;
+    else if (act === "radio") s += `\n        [SerializeField] private GameObject ${b.key}On;    // 单选页签「选中态」\n        [SerializeField] private GameObject ${b.key}Off;   // 单选页签「常态」`;
     return s;
   }).join("\n");
   const txtFields = dynTexts.map(t=>`        [SerializeField] private Text ${t.key}Text;      // ${t.name}`).join("\n");
+  // 单选页签:每组一个 SelectTabN(i),选中第 i 个、其余显示常态
+  const radioGroups = []; buttons.forEach(b => { if (clickActionOf(b).act !== "radio") return; let g = radioGroups.find(x => x.id === b.radio); if (!g) radioGroups.push(g = {id: b.radio, keys: []}); g.keys.push(b.key); });
+  const radioMethods = radioGroups.map((g, gi) => `        private void SelectTab${gi}(int i)
+        {
+            var on = new GameObject[] { ${g.keys.map(k => k + "On").join(", ")} };
+            var off = new GameObject[] { ${g.keys.map(k => k + "Off").join(", ")} };
+            for (int k = 0; k < on.Length; k++) { if (on[k] != null) on[k].SetActive(k == i); if (off[k] != null) off[k].SetActive(k != i); }
+        }
+
+`).join("");
   const wire = buttons.map(b => {
     const {act, pageIndex} = clickActionOf(b);
     const pre = act === "toggle" ? `if (${b.key}Target != null) ${b.key}Target.SetActive(!${b.key}Target.activeSelf); `
@@ -2790,6 +2920,7 @@ function genViewCs(mod, buttons, dynTexts){
       : act === "mask" ? `ToggleMask(${b.key}MaskText); `
       : act === "openPage" ? `OpenPage(${pageIndex}); `
       : act === "switchPage" ? `SwitchPage(${pageIndex}); `
+      : act === "radio" ? (() => { const gi = radioGroups.findIndex(x => x.id === b.radio); return `SelectTab${gi}(${radioGroups[gi].keys.indexOf(b.key)}); `; })()
       : act === "openPopup" ? `OpenPopup(${pageIndex}); ` : "";
     const fire = act === "closePanel" ? `onAction.Invoke("${b.key}"); onCloseRequested.Invoke();` : b.isClose && act === "event" ? `Back();` : `onAction.Invoke("${b.key}");`;
     return `            if (${b.key}Button != null) ${b.key}Button.onClick.AddListener(() => { ${pre}${fire} });`;
@@ -2914,7 +3045,7 @@ ${wire || "            // 无按钮接线"}
             onPageChanged.Invoke(to.name);
         }
 
-        private void CloseTopPopupImmediate()
+${radioMethods}        private void CloseTopPopupImmediate()
         {
             if (_popup >= 0 && pages[_popup] != null) pages[_popup].SetActive(false);
             _popup = -1;
@@ -3345,7 +3476,7 @@ TextureImporter:
 `; }
 function genReadme(mod, buttons, dynTexts){
   const btnRows = buttons.map(b=>{ const {act, target, page} = clickActionOf(b); const pg = pageOfNode(b.id);
-    return `| ${b.key} | ${pg ? pg.name.split("/")[0].trim() + " › " : ""}${b.name} | ${b.isClose && act === "event" ? "Back()" : act === "closePanel" ? "onAction(\""+b.key+"\") + onCloseRequested" : "onAction(\""+b.key+"\")"} | ${CLICK_MOTIONS[b.clickMotion||"press"]} | ${act==="event" ? (b.isClose ? "关闭弹窗/返回/关闭面板" : "—") : act === "closePanel" ? CLICK_ACTIONS[act] : CLICK_ACTIONS[act] + ":" + (page ? page.name : target.name)} |`; }).join("\n");
+    return `| ${b.key} | ${pg ? pg.name.split("/")[0].trim() + " › " : ""}${b.name} | ${b.isClose && act === "event" ? "Back()" : act === "closePanel" ? "onAction(\""+b.key+"\") + onCloseRequested" : "onAction(\""+b.key+"\")"} | ${CLICK_MOTIONS[b.clickMotion||"press"]} | ${act==="event" ? (b.isClose ? "关闭弹窗/返回/关闭面板" : "—") : act === "closePanel" || act === "radio" ? CLICK_ACTIONS[act] : CLICK_ACTIONS[act] + ":" + (page ? page.name : target.name)} |`; }).join("\n");
   const txtRows = dynTexts.map(t=>`| ${t.key} | ${t.name} | "${t.text}" |`).join("\n");
   const {scripts, art} = pkgDirs(mod);
   return `# ${mod} 模块(BUD UI Studio 生成)
