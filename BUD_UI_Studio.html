@@ -102,6 +102,8 @@
   .previewing .m-fadeIn{animation:kFadeIn .32s both}
   .previewing .m-fadeUp{animation:kFadeUp .32s both}
   .previewing .m-popIn{animation:kPopIn .36s both}
+  @keyframes kSlideIn{from{opacity:0;transform:translateX(120px)}to{opacity:1;transform:none}}
+  .previewing .m-slideIn{animation:kSlideIn .32s both}
   @keyframes kGrowX{from{transform:scaleX(0)}to{transform:scaleX(1)}}
   .previewing .m-growX{animation:kGrowX .5s both;transform-origin:left center}
   .tnode .tags{color:var(--acc);font-size:11px;margin-left:2px;overflow:hidden;text-overflow:ellipsis}
@@ -286,7 +288,7 @@ const FONTS = { // 白名单字体:与主工程同 GUID
 };
 const UGUI = { image:"fe87c0e1cc204ed48ad3b37840f39efc", text:"5f7201a12d95ffc409449d95f23cf332", button:"4e29b1a8efbd4b44bb3f3716e73f07ff",
   scrollRect:"1aa08ab6e0800fa44ae55d278d1423e3", rectMask2D:"3312d7739989d2b4e91e6319e9a96d76" };
-const MOTIONS = {none:"无", fadeIn:"淡入", fadeUp:"淡入上移", popIn:"缩放弹入", growX:"进度生长", breathe:"循环呼吸", spin:"循环旋转"};
+const MOTIONS = {none:"无", fadeIn:"淡入", fadeUp:"淡入上移", popIn:"缩放弹入", slideIn:"右侧滑入", growX:"进度生长", breathe:"循环呼吸", spin:"循环旋转"};
 const ANCHORS = { // 锚点预设 → anchorMin/Max/pivot
   tl:{min:[0,1],max:[0,1],p:[0,1],label:"↖"}, t:{min:[.5,1],max:[.5,1],p:[.5,1],label:"↑"}, tr:{min:[1,1],max:[1,1],p:[1,1],label:"↗"},
   l:{min:[0,.5],max:[0,.5],p:[0,.5],label:"←"}, c:{min:[.5,.5],max:[.5,.5],p:[.5,.5],label:"·"}, r:{min:[1,.5],max:[1,.5],p:[1,.5],label:"→"},
@@ -404,7 +406,7 @@ function renderStage(){
   });
   const make = (n, parentEl, px, py)=>{
     const el = document.createElement("div");
-    el.className = "node" + (n.id===selId?" sel":"") + (n.type==="button"?" btnNode":"") + (n.motion!=="none"?` m-${n.motion}`:"") + (isKeepOld(n)?" keepOld":"");
+    el.className = "node" + (n.id===selId?" sel":"") + (n.type==="button"?" btnNode":"") + (n.motion!=="none" && !(playSwitching && n.skipOnSwitch && n.motion!=="breathe" && n.motion!=="spin")?` m-${n.motion}`:"") + (isKeepOld(n)?" keepOld":"");
     el.dataset.id = n.id; elById[n.id] = el;
     if (n.type==="button" || n.clickable) el.dataset.click = "1";
     if (n.scroll) el.dataset.scroll = n.scroll;
@@ -514,6 +516,7 @@ function renderInsp(){
   }
   h += row("进场动效", `<select onchange="setProp('motion',this.value)">${Object.entries(MOTIONS).map(([k,v])=>`<option value="${k}" ${n.motion===k?"selected":""}>${v}</option>`).join("")}</select>`);
   h += row("动效延迟", `<input type="number" min="0" step="0.05" value="${n.motionDelay}" onchange="setProp('motionDelay',+this.value)">`);
+  if (n.motion !== "none" && n.motion !== "breathe" && n.motion !== "spin") h += row("切页签不重播", `<input type="checkbox" style="width:auto" ${n.skipOnSwitch?"checked":""} onchange="setProp('skipOnSwitch',this.checked)" title="在同组页签之间切换时不重播这个节点的进场动效(各页签共用的部分保持不动,只有换掉的内容出场)">`);
   if (n.figma && (n.x !== n.figma.x || n.y !== n.figma.y || n.w !== n.figma.w || n.h !== n.figma.h))
     h += `<div class="row" style="color:var(--warn)">位置与 Figma 原稿不同 <button onclick="restoreNodeLayout()" style="flex:none">↺ 还原位置</button></div>`;
   h += `<div class="row" style="margin-top:10px;gap:6px;flex-wrap:wrap">
@@ -695,7 +698,7 @@ const CLICK_MOTIONS = {press:"按下缩放", bounce:"点击弹跳", shake:"点�
 const CLICK_ACTIONS = {event:"仅触发事件", closePanel:"关闭整个面板", openPage:"打开页面", switchPage:"切换页签(替换当前页,不进返回栈)", openPopup:"打开弹窗", toggle:"切换显示/隐藏", show:"显示节点", hide:"隐藏节点", swap:"切换到(显示目标、隐藏自己)", mask:"切换数字遮罩(***)"};
 let playing = false, elById = {};
 let playState = {hidden:{}, masked:{}, offset:{}};
-let playNav = {stack: [], popup: null}, playLayers = {base: null, popup: null};
+let playNav = {stack: [], popup: null}, playLayers = {base: null, popup: null}, playSwitching = false;
 const maskDigits = s => String(s).replace(/\d+(\.\d+)?/g, "***");
 function resetPlayState(){ playState = {hidden:{}, masked:{}, offset:{}}; walkAll(n => { if (n.hiddenByDefault) playState.hidden[n.id] = true; }); }
 // ---- 试玩导航:与导出的 View.OpenPage / OpenPopup / Back 同一套规则 ----
@@ -716,8 +719,15 @@ function slideIn(dir, prev){
   if (prev && prev !== l){ const drop = () => prev.remove(); a.onfinish = a.oncancel = drop; setTimeout(drop, 400); }   // 页面在后台时动画事件会延后,定时兜底
 }
 function playOpenPage(id){ if (!pageById(id)) return false; const prev = playLayers.base; playNav.popup = null; playNav.stack.push(id); renderStage(); slideIn(1, prev); return true; }
-// 切换页签:替换导航栈顶(栈里只有主页时等于打开页面),不进返回栈,只淡入不滑动(与导出的 View.SwitchPage 一致)
-function playSwitchPage(id){ if (!pageById(id)) return false; const prev = playLayers.base, swap = playNav.stack.length > 1; if (swap && playNav.stack[playNav.stack.length - 1] === id) return true; playNav.popup = null; if (swap) playNav.stack.pop(); playNav.stack.push(id); renderStage(); slideIn(swap ? 0 : 1, prev); return true; }
+// 切换页签:替换导航栈顶(栈里只有主页时等于打开页面),不进返回栈;瞬间换页,标了「切页签不重播」的共用部分不重播进场动效(与导出的 View.SwitchPage 一致)
+function playSwitchPage(id){
+  if (!pageById(id)) return false;
+  if (playNav.stack.length <= 1) return playOpenPage(id);
+  if (playNav.stack[playNav.stack.length - 1] === id) return true;
+  playNav.popup = null; playNav.stack.pop(); playNav.stack.push(id);
+  playSwitching = true; try { renderStage(); } finally { playSwitching = false; }
+  return true;
+}
 function playOpenPopup(id){ if (!pageById(id)) return false; playNav.popup = id; mountPopup(); return true; }
 function playBack(){ // 先关弹窗,再退页面,已在主页则请求关闭面板
   if (playNav.popup){ playNav.popup = null; unmountPopup(); return "popup"; }
@@ -1380,7 +1390,7 @@ function tuneVariantPopup(pg){
 function reconfigurePages(pages){
   const cur = proj.activePage;
   pages.forEach(p => resetAuto(p.nodes));
-  for (const p of pages){ proj.activePage = p.id; ensurePages(); promoteScrollAreas(p.nodes); groupHotspots(p.nodes); autoInteract(); autoMotion(); if (p.popupOf) tuneVariantPopup(p); }
+  for (const p of pages){ proj.activePage = p.id; ensurePages(); tidyPage(p.nodes); autoInteract(); autoMotion(); if (p.popupOf) tuneVariantPopup(p); }
   proj.activePage = cur; ensurePages();
 }
 const linkSummary = (links, pops) => [pops && pops.length ? "识别出 " + pops.length + " 个弹窗页(" + pops.map(p => p.name).join("、") + ")" : "", links && links.named ? "按名字连上 " + links.named + " 条跳转" : "",
@@ -1432,6 +1442,12 @@ function autoLinkPages(onlyPage){
     if (S.length < 2 || !S.includes(p) || !S.every(q => S.every(r => acts.get(q.id).has(pageCore(r))))) return;
     const k = S.map(q => q.id).join(","); if (!seenG.has(k)){ seenG.add(k); groups.push(S); }
   });
+  // 页签组各页共用的部分(同名、同位置)切页签时不重播进场动效;滚动区里的内容照常出场(换的就是它);内容区各页范围不同,按名字算共用
+  const sigs = pg => { const out = new Map(); const rec = (list, ox, oy, inScroll) => list.forEach(n => { const ax = ox + n.x, ay = oy + n.y; out.set(n, inScroll ? "" : n.contentArea ? "@内容区" : [n.name, n.type, ax, ay, n.w, n.h].join("|")); rec(n.children, ax, ay, inScroll || !!n.isScrollContent); }); rec(pg.nodes, 0, 0, false); return out; };
+  groups.forEach(g => g.filter(inScope).forEach(pg => {
+    const others = new Set(); g.forEach(q => { if (q !== pg) sigs(q).forEach(v => { if (v) others.add(v); }); });
+    sigs(pg).forEach((v, n) => { if (v && others.has(v)) n.skipOnSwitch = true; else delete n.skipOnSwitch; });
+  }));
   const popupFor = pg => {   // 当前页核心名(或它的前缀)对应的弹窗页:弹窗变体的底页核心名等于它、或以它开头
     const c = pageCore(pg);
     const cand = popups.map(pp => ({pp, bc: pp.popupOf && pageById(pp.popupOf) ? pageCore(pageById(pp.popupOf)) : ""})).filter(x => x.bc && (x.bc === c || x.bc.startsWith(c)));
@@ -1516,13 +1532,7 @@ function autoInteract(){
 /* 一键配动效:背景淡入 → 返回/标题淡入上移 → 卡片依次弹入(间隔 55ms)→ 进度条生长 → 按钮弹入;叠放在底板上的元素与底板同步出场 */
 function autoMotion(){
   walk(n => { n.motion = "none"; n.motionDelay = 0; });
-  // 出场单元 = 页面顶层节点;名字不是背景的全屏纯分组(如 Figma 里的「PSD切图 · …」图层组)展开成里面的切图各自配(坐标换成页面坐标),背景分组仍整体淡入
-  const full = n => n.w >= STAGE_W * 0.9 && n.h >= STAGE_H * 0.9, units = [];
-  const expand = (list, ox, oy) => list.forEach(n => {
-    if (n.type === "container" && full(n) && n.children.length && !n.scroll && !n.clip && !n.clickable && !n.protoLink && !/background|^bg|背景|底图/i.test(n.name || "")) return expand(n.children, ox + n.x, oy + n.y);
-    units.push({n, x: ox + n.x, y: oy + n.y, w: n.w, h: n.h, i: units.length});
-  });
-  expand(proj.nodes, 0, 0);
+  const full = n => n.w >= STAGE_W * 0.9 && n.h >= STAGE_H * 0.9, units = motionUnits(proj.nodes);
   const ordered = units.slice().sort((a, b) => (a.y - b.y) || (a.x - b.x) || (a.i - b.i));
   // 卡片组:≥3 个同尺寸(±6px)的非文字元素排成一行或一列(奖励列、任务行、商品格)→ 按排列顺序依次弹入
   const cardDelay = new Map(), inSet = new Set(), near = (a, b) => Math.abs(a - b) <= 6;
@@ -1540,10 +1550,12 @@ function autoMotion(){
   const contains = (a, b) => b.x + b.w / 2 >= a.x && b.x + b.w / 2 <= a.x + a.w && b.y + b.h / 2 >= a.y && b.y + b.h / 2 <= a.y + a.h;
   for (const u of ordered){
     const n = u.n, nm = n.name;
+    if (n.contentArea){ n.motion = "slideIn"; n.motionDelay = 0.05; continue; }   // 内容区整体从右侧滑入,里面的单元照常各自出场
     if (full(u)){ n.motion = "fadeIn"; n.motionDelay = 0; continue; }       // 全屏背景
     if (n.isClose){ n.motion = "fadeIn"; n.motionDelay = 0.1; continue; }
     if (n.scroll){ const content = n.children.find(c => c.isScrollContent) || n.children[0];
-      (content ? content.children : []).forEach((card, i) => { card.motion = "popIn"; card.motionDelay = r4(0.2 + Math.min(i, 4) * 0.055); }); continue; }
+      const list = content ? content.children : [], rows = n.scroll === "v" && list.length && list.every(c => c.w >= n.w * 0.6);   // 竖向列表的整行条目(任务条)右侧滑入,格子 / 横排卡片弹入
+      list.forEach((card, i) => { card.motion = rows ? "slideIn" : "popIn"; card.motionDelay = r4(0.2 + Math.min(i, 4) * 0.055); }); continue; }
     if (/progress.*(fill|filled|bar)|进度.*(条|填充)/i.test(nm)){ n.motion = "growX"; n.motionDelay = 0.45; continue; }
     if (/spinner|loading|加载/i.test(nm)){ n.motion = "spin"; continue; }
     if (/popup|dialog|modal|弹窗/i.test(nm)){ n.motion = "popIn"; n.motionDelay = 0; continue; }
@@ -1555,6 +1567,85 @@ function autoMotion(){
     else { n.motion = "fadeUp"; n.motionDelay = r4(Math.min(0.6, 0.05 + rank * 0.05)); }
     rank++; done.push(u);
   }
+}
+/* 出场单元:页面顶层节点;名字不是背景的全屏纯分组(如 Figma 里的「PSD切图 · …」图层组)展开成里面的切图各自配,背景分组仍整体淡入;
+   内容区(contentArea)自己算一个单元,里面的节点也展开成单元。坐标换成页面坐标;root = 所在的页面顶层节点 */
+function motionUnits(nodes){
+  const full = n => n.w >= STAGE_W * 0.9 && n.h >= STAGE_H * 0.9, units = [];
+  const expand = (list, ox, oy, parent, root) => list.forEach(n => {
+    const r = root || n, u = {n, x: ox + n.x, y: oy + n.y, w: n.w, h: n.h, i: units.length, parent, root: r};
+    if (n.contentArea){ units.push(u); return expand(n.children, u.x, u.y, n, r); }
+    if (n.type === "container" && full(n) && n.children.length && !n.scroll && !n.clip && !n.clickable && !n.protoLink && !/background|^bg|背景|底图/i.test(n.name || "")) return expand(n.children, u.x, u.y, n, r);
+    units.push(u);
+  });
+  expand(nodes, 0, 0, null, null);
+  return units;
+}
+// 把节点从原父级挪到新父级下(坐标按页面坐标换算),Figma 原始坐标记录同步平移
+function reparentTo(n, fromList, toList, ax, ay, ox, oy){
+  fromList.splice(fromList.indexOf(n), 1);
+  const nx = ax - ox, ny = ay - oy;
+  if (n.figma) n.figma = Object.assign({}, n.figma, {x: n.figma.x + nx - n.x, y: n.figma.y + ny - n.y});
+  n.x = nx; n.y = ny; toList.push(n);
+}
+/* 奖励轨道:纯分组里 ≥3 张同尺寸的竖长卡片排成一行,且最后一张被后画的同高元素盖住一截(如钉在右侧的 50 级大奖列)→ 这排是一条可横向滑动的轨道。
+   每张卡片和落在它上面的图标 / 文字收成一个分组,整排放进横向滚动区,可视宽度到盖住它的元素左边为止。重复执行不变。返回新建的轨道数 */
+function promoteCardTrack(nodes){
+  const flat = [];
+  const rec = (list, ox, oy, parent, anc) => list.forEach(n => { const f = {n, ax: ox + n.x, ay: oy + n.y, parent, anc}; flat.push(f); rec(n.children, f.ax, f.ay, n, anc.concat(n)); });
+  rec(nodes, 0, 0, null, []);
+  const pass = c => c.type === "container" && !c.scroll && !c.isScrollContent && !c.clip && !c.clickable && !c.protoLink && !String(c.name || "").startsWith("操作/");
+  const free = f => f.anc.every(pass) && !f.n.clickable && !f.n.protoLink && !f.n.hiddenByDefault && !String(f.n.name || "").startsWith("操作/");
+  const near = (a, b) => Math.abs(a - b) <= 6, inside = (f, c) => { const cx = f.ax + f.n.w / 2, cy = f.ay + f.n.h / 2; return cx >= c.ax && cx <= c.ax + c.n.w && cy >= c.ay && cy <= c.ay + c.n.h; };
+  const cards = flat.filter(f => f.n.type === "image" && free(f) && f.n.w >= 120 && f.n.h >= 200 && f.n.w < STAGE_W * 0.4 && f.n.h > f.n.w);
+  const used = new Set(), taken = new Set(); let made = 0;
+  for (const c of cards){
+    if (used.has(c)) continue;
+    const row = cards.filter(d => !used.has(d) && near(d.n.w, c.n.w) && near(d.n.h, c.n.h) && near(d.ay, c.ay)).sort((a, b) => a.ax - b.ax);
+    if (row.length < 3) continue;
+    row.forEach(d => used.add(d));
+    const last = row[row.length - 1], li = flat.indexOf(last);
+    const covers = flat.slice(li + 1).filter(f => f.n.type !== "text" && !row.includes(f) && f.n.h >= last.n.h * 0.8 && f.ax > last.ax + 10 && f.ax < last.ax + last.n.w - 10 && f.ay < last.ay + last.n.h && f.ay + f.n.h > last.ay);
+    if (!covers.length) continue;
+    const groups = row.map(card => ({card, items: flat.filter(f => f !== card && !row.includes(f) && free(f) && !taken.has(f.n) && !f.anc.some(a => taken.has(a)) && f.n.w <= card.n.w * 1.2 && f.n.h <= card.n.h * 1.2 && inside(f, card))}));
+    groups.forEach(g => { taken.add(g.card.n); g.items.forEach(f => taken.add(f.n)); });
+    const all = groups.flatMap(g => [g.card].concat(g.items));
+    const left = row[0].ax, right = Math.min(...covers.map(f => f.ax)), top = Math.min(...all.map(f => f.ay)), bottom = Math.max(...all.map(f => f.ay + f.n.h));
+    const host = row[0].parent, hostList = host ? host.children : nodes, hostF = host ? flat.find(f => f.n === host) : {ax: 0, ay: 0};
+    const at = Math.min(...row.map(d => hostList.indexOf(d.n)).filter(i => i >= 0));   // 放在这排卡片最早画的位置,原来压在卡片上面的元素仍在上面
+    const cw = last.ax + last.n.w - left + 8, h = bottom - top;
+    const content = {id: newId(), type: "container", name: "内容", children: [], anchor: "l", motion: "none", motionDelay: 0, x: 0, y: 0, w: cw, h, isScrollContent: true, figma: {x: 0, y: 0, w: cw, h}};
+    const track = {id: newId(), type: "container", name: "奖励列表 · 可滑动", children: [content], anchor: "c", motion: "none", motionDelay: 0, scroll: "h",
+      x: left - hostF.ax, y: top - hostF.ay, w: right - left, h, figma: {x: left - hostF.ax, y: top - hostF.ay, w: right - left, h}};
+    groups.forEach(g => {
+      const gx = g.card.ax - left, gy = g.card.ay - top;
+      const box = {id: newId(), type: "container", name: g.card.n.name.split("/").pop(), children: [], anchor: "c", motion: "none", motionDelay: 0, x: gx, y: gy, w: g.card.n.w, h: g.card.n.h, figma: {x: gx, y: gy, w: g.card.n.w, h: g.card.n.h}};
+      content.children.push(box);
+      [g.card].concat(g.items).sort((a, b) => flat.indexOf(a) - flat.indexOf(b)).forEach(f => reparentTo(f.n, f.parent ? f.parent.children : nodes, box.children, f.ax, f.ay, g.card.ax, g.card.ay));
+    });
+    hostList.splice(Math.min(at, hostList.length), 0, track); made++;
+  }
+  return made;
+}
+/* 内容区:有左侧栏(贴左边、高 ≥ 60% 的窄条)的页面,把侧栏、左上角标题栏、返回以外的内容收进一个「内容区」节点,出场时整体从右侧滑入。
+   页签组各页的内容区同名同位置,切页签时不重播(只有换掉的内容出场)。已有内容区就不再收。返回 1 / 0 */
+function buildContentArea(nodes){
+  if (nodes.some(n => n.contentArea)) return 0;
+  const full = n => n.w >= STAGE_W * 0.9 && n.h >= STAGE_H * 0.9, units = motionUnits(nodes);
+  const side = units.find(u => u.x <= 10 && u.h >= STAGE_H * 0.6 && u.w <= STAGE_W * 0.25);
+  if (!side) return 0;
+  const edge = side.x + side.w;
+  const members = units.filter(u => u !== side && !full(u) && u.x + u.w / 2 > edge && u.y + u.h / 2 > STAGE_H * 0.11);
+  if (members.length < 3) return 0;
+  const x0 = Math.min(...members.map(u => u.x)), y0 = Math.min(...members.map(u => u.y));
+  const x1 = Math.max(...members.map(u => u.x + u.w)), y1 = Math.max(...members.map(u => u.y + u.h));
+  const area = {id: newId(), type: "container", name: "内容区", contentArea: true, children: [], anchor: "c", motion: "none", motionDelay: 0, x: x0, y: y0, w: x1 - x0, h: y1 - y0, figma: {x: x0, y: y0, w: x1 - x0, h: y1 - y0}};
+  const at = nodes.indexOf(members[0].root);
+  const hosts = new Set();
+  members.forEach(u => { if (u.parent) hosts.add(u.parent); reparentTo(u.n, u.parent ? u.parent.children : nodes, area.children, u.x, u.y, x0, y0); });
+  nodes.splice(Math.max(0, Math.min(at, nodes.length)), 0, area);
+  hosts.forEach(h => { if (!h.children.length){ const i = nodes.indexOf(h); if (i >= 0) nodes.splice(i, 1); } });   // 被搬空的全屏图层组删掉
+  return 1;
 }
 /* 补认滚动区:Figma 里滚动框直接装着各行 / 各格(没有一层超出的内容容器)时,导入只当成裁剪框。
    名称带「可滑动 / 可滚动 / 滚动 / scroll」、内容超出框的裁剪容器 → 包一层「内容」节点(位于 0,0)、设成滚动区;超出多的方向为滚动方向。
@@ -1589,13 +1680,18 @@ function groupHotspots(nodes){
   flat.forEach((h, hi) => {
     if (!isHot(h.n) || h.anc.some(a => taken.has(a)) || h.n.w * h.n.h <= 0) return;
     const mx = Math.max(12, h.n.w * 0.15), my = Math.max(12, h.n.h * 0.15), grab = [];
+    let first = -1;
     for (let i = 0; i < hi; i++){
       const v = flat[i], n = v.n;
       if (h.anc.includes(n) || taken.has(n) || v.anc.some(a => taken.has(a) || isHot(a)) || isHot(n) || n.protoLink || n.hiddenByDefault || n.scroll || n.isScrollContent) continue;
-      if (n.w >= STAGE_W * 0.9 && n.h >= STAGE_H * 0.9) continue;
-      if (v.ax < h.ax - mx || v.ay < h.ay - my || v.ax + n.w > h.ax + h.n.w + mx || v.ay + n.h > h.ay + h.n.h + my || n.w * n.h > h.n.w * h.n.h * 1.3) continue;
+      if (n.w >= STAGE_W * 0.9 && n.h >= STAGE_H * 0.9 || n.w * n.h > h.n.w * h.n.h * 1.3) continue;
+      const inside = !(v.ax < h.ax - mx || v.ay < h.ay - my || v.ax + n.w > h.ax + h.n.w + mx || v.ay + n.h > h.ay + h.n.h + my);
+      // 叠在已收切图上面、中心落在热区里的小件(如列角上的锁)也一起收,否则底图挪进热区后它会被压到下面
+      const cx = v.ax + n.w / 2, cy = v.ay + n.h / 2, over = first >= 0 && cx >= h.ax - mx && cx <= h.ax + h.n.w + mx && cy >= h.ay - my && cy <= h.ay + h.n.h + my;
+      if (!inside && !over) continue;
       let k = 0; while (k < v.anc.length && v.anc[k] === h.anc[k]) k++;   // 两者共同的祖先之外,v 往上的分组都必须是纯分组
       if (!v.anc.slice(k).every(pass)) continue;
+      if (first < 0) first = i;
       grab.push(v); taken.add(n);
     }
     grab.forEach(v => {
@@ -1607,13 +1703,15 @@ function groupHotspots(nodes){
   });
   return moved;
 }
+// 一键配置前整理页面结构(都可重复执行):补认滚动区 → 热区收拢按钮切图 → 奖励轨道改横向滚动 → 收内容区
+function tidyPage(nodes){ promoteScrollAreas(nodes); groupHotspots(nodes); promoteCardTrack(nodes); buildContentArea(nodes); }
 // 清掉自动识别写上的交互标记(按钮组件本身、初始隐藏等手动设置不动)
 // protoLink = Figma 原型带来的交互(交互组件的状态切换),不是自动识别配的,复位和重配都不动
-function resetAuto(nodes){ walk(n => { if (n.protoLink) return; if (n.type !== "button"){ n.clickable = false; n.isClose = false; } if (n.type === "text") n.dynamic = false; delete n.clickMotion; delete n.clickAction; delete n.clickTarget; delete n.clickTargetPage; }, nodes); }
+function resetAuto(nodes){ walk(n => { if (n.protoLink) return; if (n.type !== "button"){ n.clickable = false; n.isClose = false; } if (n.type === "text") n.dynamic = false; delete n.clickMotion; delete n.clickAction; delete n.clickTarget; delete n.clickTargetPage; delete n.skipOnSwitch; }, nodes); }
 /* 一键配动效与交互。按钮:整个模块所有页面一起重配——先全部复位,再按页面顺序逐页识别(标识与整体导入时一致),最后重新连好页面跳转;
    silent(导入时):只配刚建好的当前页,某页切图全缺失时也不弹窗打断 */
 function autoConfigure(silent){
-  if (silent){ resetAuto(proj.nodes); if (countNodes()){ promoteScrollAreas(proj.nodes); groupHotspots(proj.nodes); autoInteract(); autoMotion(); } return; }
+  if (silent){ resetAuto(proj.nodes); if (countNodes()){ tidyPage(proj.nodes); autoInteract(); autoMotion(); } return; }
   ensurePages();
   const pages = proj.pages.filter(p => p.nodes.length);
   if (!pages.length) return showMsg("画布是空的", "先从 Figma 拉取一个界面。");
@@ -2125,7 +2223,7 @@ const singleLine = n => n.type === "text" && !/\n/.test(n.text || "") && n.h < (
 function textBlock(fid, goFid, n, isLabel, raycast){ const c = col(isLabel?n.labelColor:n.textColor); const font = FONTS[isLabel?n.labelFont:n.font].guid; const size = isLabel?n.labelSize:n.fontSize; const align = isLabel?4:(n.alignV*3+n.alignH); const txt = isLabel?n.label:n.text;
   return monoHead(fid, goFid, UGUI.text) + `  m_Material: {fileID: 0}\n  m_Color: {r: ${c.r}, g: ${c.g}, b: ${c.b}, a: ${n.alpha??1}}\n  m_RaycastTarget: ${raycast?1:0}\n  m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}\n  m_Maskable: 1\n  m_OnCullStateChanged:\n    m_PersistentCalls:\n      m_Calls: []\n  m_FontData:\n    m_Font: {fileID: 12800000, guid: ${font}, type: 3}\n    m_FontSize: ${size}\n    m_FontStyle: 0\n    m_BestFit: 0\n    m_MinSize: 2\n    m_MaxSize: ${Math.max(40,size)}\n    m_Alignment: ${align}\n    m_AlignByGeometry: 0\n    m_RichText: 0\n    m_HorizontalOverflow: ${isLabel || singleLine(n) ? 1 : 0}\n    m_VerticalOverflow: 1\n    m_LineSpacing: 1\n  m_Text: ${yStr(txt)}\n`; }
 function buttonBlock(fid, goFid, targetGraphicFid, transition = 1){ return monoHead(fid, goFid, UGUI.button) + `  m_Navigation:\n    m_Mode: 3\n    m_WrapAround: 0\n    m_SelectOnUp: {fileID: 0}\n    m_SelectOnDown: {fileID: 0}\n    m_SelectOnLeft: {fileID: 0}\n    m_SelectOnRight: {fileID: 0}\n  m_Transition: ${transition}\n  m_Colors:\n    m_NormalColor: {r: 1, g: 1, b: 1, a: 1}\n    m_HighlightedColor: {r: 1, g: 1, b: 1, a: 1}\n    m_PressedColor: {r: 0.93, g: 0.91, b: 1, a: 1}\n    m_SelectedColor: {r: 1, g: 1, b: 1, a: 1}\n    m_DisabledColor: {r: 0.7, g: 0.7, b: 0.75, a: 1}\n    m_ColorMultiplier: 1\n    m_FadeDuration: 0.08\n  m_SpriteState:\n    m_HighlightedSprite: {fileID: 0}\n    m_PressedSprite: {fileID: 0}\n    m_SelectedSprite: {fileID: 0}\n    m_DisabledSprite: {fileID: 0}\n  m_AnimationTriggers:\n    m_NormalTrigger: Normal\n    m_HighlightedTrigger: Highlighted\n    m_PressedTrigger: Pressed\n    m_SelectedTrigger: Selected\n    m_DisabledTrigger: Disabled\n  m_Interactable: 1\n  m_TargetGraphic: {fileID: ${targetGraphicFid}}\n  m_OnClick:\n    m_PersistentCalls:\n      m_Calls: []\n`; }
-function motionBlock(fid, goFid, guid, preset, delay){ const map = {fadeIn:0,fadeUp:1,popIn:2,breathe:3,spin:4,growX:5}; return monoHead(fid, goFid, guid) + `  preset: ${map[preset]}\n  delaySeconds: ${delay||0}\n`; }
+function motionBlock(fid, goFid, guid, preset, delay, skipOnSwitch){ const map = {fadeIn:0,fadeUp:1,popIn:2,breathe:3,spin:4,growX:5,slideIn:6}; return monoHead(fid, goFid, guid) + `  preset: ${map[preset]}\n  delaySeconds: ${delay||0}\n` + (skipOnSwitch ? "  skipOnSwitch: 1\n" : ""); }
 
 /* 锚点换算:编辑器左上原点 → Unity RectTransform */
 function calcRect(n, pw, ph){
@@ -2507,7 +2605,7 @@ function genPrefab(mod, usedAssets, guids, buttons, dynTexts, ids = {}){
     }
     if (n.motion && n.motion!=="none"){
       const mFid = F("motion"); comps.push(mFid);
-      body += motionBlock(mFid, goFid, guids.motion, n.motion, n.motionDelay);
+      body += motionBlock(mFid, goFid, guids.motion, n.motion, n.motionDelay, n.skipOnSwitch && n.motion !== "breathe" && n.motion !== "spin");
     }
     // 按钮文字子节点
     let labelChild = "";
@@ -2772,17 +2870,24 @@ ${wire || "            // 无按钮接线"}
             onPageChanged.Invoke(pages[index].name);
         }
 
-        /// <summary>切换页签:替换当前页(不进返回栈,Back 回到打开这组页签之前的页);当前在主页时等于 OpenPage。</summary>
+        /// <summary>切换页签:替换当前页(不进返回栈,Back 回到打开这组页签之前的页),瞬间换页、共用部分不重播动效;当前在主页时等于 OpenPage。</summary>
         public void SwitchPage(int index)
         {
             if (pages == null || index <= 0 || index >= pages.Length || pages[index] == null) return;
             if (_stack.Count <= 1) { OpenPage(index); return; }
             CloseTopPopupImmediate();
             var from = pages[_stack[_stack.Count - 1]];
-            if (from == pages[index]) return;
+            var to = pages[index];
+            if (from == to) return;
             _stack[_stack.Count - 1] = index;
-            StartCoroutine(Transit(from, pages[index], 0));
-            onPageChanged.Invoke(pages[index].name);
+            // 瞬间换页:各页签共用的部分(Motion.skipOnSwitch)不重播进场动效,只有换掉的内容出场;先开新页再关旧页,中间不露底
+            var tg = GroupOf(to); tg.alpha = 1; tg.blocksRaycasts = true;
+            ((RectTransform)to.transform).anchoredPosition = Vector2.zero;
+            to.transform.SetAsLastSibling();
+            ${mod}Motion.switching = true;
+            try { to.SetActive(true); } finally { ${mod}Motion.switching = false; }
+            from.SetActive(false);
+            onPageChanged.Invoke(to.name);
         }
 
         /// <summary>打开弹窗:叠在当前页上方(已有弹窗时替换)。</summary>
@@ -2914,10 +3019,14 @@ namespace Bud.${mod}
     /// </summary>
     public class ${mod}Motion : MonoBehaviour
     {
-        public enum Preset { FadeIn = 0, FadeUp = 1, PopIn = 2, Breathe = 3, Spin = 4, GrowX = 5 }
+        public enum Preset { FadeIn = 0, FadeUp = 1, PopIn = 2, Breathe = 3, Spin = 4, GrowX = 5, SlideIn = 6 }
 
         public Preset preset;
         public float delaySeconds;
+        /// <summary>同组页签之间切换(View.SwitchPage)时不重播:各页签共用的部分保持不动。</summary>
+        public bool skipOnSwitch;
+        /// <summary>View.SwitchPage 激活新页签期间为 true。</summary>
+        public static bool switching;
         [HideInInspector] public bool reducedMotion;
 
         private CanvasGroup _group;
@@ -2949,6 +3058,8 @@ namespace Bud.${mod}
         private void OnEnable()
         {
             if (_co != null) StopCoroutine(_co);
+            _co = null;
+            if (switching && skipOnSwitch && preset != Preset.Breathe && preset != Preset.Spin) { Restore(); return; }
             _co = StartCoroutine(Play());
         }
 
@@ -2973,14 +3084,17 @@ namespace Bud.${mod}
                 case Preset.FadeIn:
                 case Preset.FadeUp:
                 case Preset.PopIn:
+                case Preset.SlideIn:
                     _group.alpha = 0;
                     if (preset == Preset.FadeUp) SetOffset(Vector2.down * 28);
+                    if (preset == Preset.SlideIn) SetOffset(Vector2.right * 120);
                     if (delaySeconds > 0) yield return new WaitForSecondsRealtime(delaySeconds);
                     for (float t = 0; t < 0.32f; t += Time.unscaledDeltaTime)
                     {
                         float k = Mathf.SmoothStep(0, 1, t / 0.32f);
                         _group.alpha = k;
                         if (preset == Preset.FadeUp) SetOffset(Vector2.down * 28 * (1 - k));
+                        if (preset == Preset.SlideIn) SetOffset(Vector2.right * 120 * (1 - k));
                         if (preset == Preset.PopIn) transform.localScale = _restScale * Mathf.LerpUnclamped(0.86f, 1f, k <= 0.7f ? k / 0.7f * 1.18f : 1.18f - (k - 0.7f) / 0.3f * 0.18f);
                         yield return null;
                     }
