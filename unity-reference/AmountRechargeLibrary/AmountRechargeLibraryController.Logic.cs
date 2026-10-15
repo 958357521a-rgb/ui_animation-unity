@@ -130,7 +130,7 @@ namespace Bud.AmountRechargeLibrary
                 if (c.rewardName == null) missing.Add(d.name);
                 if (c.amount == null) missing.Add(d.amount);
                 if (d.count != null && c.count == null) missing.Add(d.count);
-                FitRewardName(c.rewardName);
+                if (c.rewardName != null) _nameMax[c.rewardName] = c.rewardName.fontSize;   // 记下设计稿字号(最大字号)
                 c.statusTemplate = c.status != null ? c.status.text : null;
                 c.amountTemplate = c.amount != null ? c.amount.text : null;
                 c.countTemplate = c.count != null ? c.count.text : null;
@@ -144,18 +144,24 @@ namespace Bud.AmountRechargeLibrary
                 Debug.LogError($"[AmountRechargeLibraryController] 视图里找不到这些标识:{string.Join("、", missing)}。对照工作台 README 事件表改 AmountRechargeLibraryController.Logic.cs 顶部的 DesignCards。");
         }
 
-        // 奖励名(服务端下发的 title,如「优优币*12+巫灵夜游会头像框」)比设计稿的占位文字长:开自动缩小,最大 = 设计稿字号,
-        // 最小 = 55%;横向 Wrap + 纵向 Truncate,保证缩小后落在文字框里、不超出卡片(缩到最小仍放不下的才会被截掉)
-        private static void FitRewardName(Text t)
+        // 奖励名(服务端下发的 title,如「优优币*12+巫灵夜游会头像框」)比设计稿的占位文字长:按文字框宽度自动缩小字号,
+        // 最大 = 设计稿字号,最小 = 75%;MiddleCenter(prefab 里奖励名也是这个对齐,框中心 = 正常字号时的字位置,缩小后仍居中)。
+        // 先找「单行放得下」的最大字号;缩到最小仍放不下就在最小字号折成两行(纵向 Overflow,两行约 48px,仍在底下黄色色带 54px 里)
+        private void FitRewardName(Text t)
         {
             if (t == null) return;
-            int max = t.fontSize;
-            t.resizeTextForBestFit = true;
-            t.resizeTextMaxSize = max;
-            t.resizeTextMinSize = Mathf.Max(2, Mathf.RoundToInt(max * 0.55f));
+            int max = _nameMax.TryGetValue(t, out var m) ? m : t.fontSize;
+            int min = Mathf.Max(2, Mathf.RoundToInt(max * 0.75f));
+            t.resizeTextForBestFit = false;
+            t.alignment = TextAnchor.MiddleCenter;
             t.horizontalOverflow = HorizontalWrapMode.Wrap;
-            t.verticalOverflow = VerticalWrapMode.Truncate;
+            t.verticalOverflow = VerticalWrapMode.Overflow;
+            float width = t.rectTransform.rect.width;
+            int size = max;
+            t.fontSize = size;
+            while (size > min && t.preferredWidth > width) t.fontSize = --size;
         }
+        private readonly Dictionary<Text, int> _nameMax = new Dictionary<Text, int>();
 
         // ---------- 赛季 / 档位表(照搬旧版 GetCurActivityId / GenerateContent 的取表部分)----------
         private static ActivityId GetCurActivityId()
@@ -199,7 +205,7 @@ namespace Bud.AmountRechargeLibrary
             {
                 c.button.gameObject.SetActive(c.reward != null);
                 if (c.reward == null) continue;
-                if (c.rewardName != null) c.rewardName.text = c.reward.title;
+                if (c.rewardName != null) { c.rewardName.text = c.reward.title; FitRewardName(c.rewardName); }
                 if (c.amount != null) c.amount.text = FillNumber(c.amountTemplate, c.reward.progress.ToString());
                 // TODO 第 1、7 档设计稿没有数量文字;其它档设计稿的数量文字要和 json 的 rewardNum1 对得上(S17:6/12/30/30/60)
                 if (c.count != null) c.count.text = FillNumber(c.countTemplate, c.reward.rewardNum1.ToString());
