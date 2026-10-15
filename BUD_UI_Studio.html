@@ -1211,7 +1211,7 @@ async function importScreens(frames, render, opts){
   say("整理页面结构…"); await ensureOpaque();
   if (opts.mode === "new" || popups.length) reconfigurePages(opts.mode === "new" ? proj.pages.filter(p => p.nodes.length) : popups);
   const links = autoLinkPages();
-  proj.activePage = proj.pages[0].id; ensurePages();
+  proj.activePage = proj.pages[0].id; ensurePages(); proj.autoRules = AUTO_RULES;
   selId = null; renderAll(); fitStage(); autosave();
   return {results, links, popups};
 }
@@ -1877,6 +1877,8 @@ function buildRadioTabs(nodes){
 function resetAuto(nodes){ walk(n => { if (n.protoLink) return; if (n.type !== "button"){ n.clickable = false; n.isClose = false; } if (n.type === "text") n.dynamic = false; delete n.clickMotion; delete n.clickAction; delete n.clickTarget; delete n.clickTargetPage; delete n.skipOnSwitch; }, nodes); }
 /* 一键配动效与交互。按钮:整个模块所有页面一起重配——先全部复位,再按页面顺序逐页识别(标识与整体导入时一致),最后重新连好页面跳转;
    silent(导入时):只配刚建好的当前页,某页切图全缺失时也不弹窗打断 */
+// 自动配置规则(tidyPage / autoInteract / autoMotion / autoLinkPages)有影响结果的改动时改这个值
+const AUTO_RULES = "2026-10-15c";
 function autoConfigure(silent){
   if (silent){ resetAuto(proj.nodes); if (countNodes()){ tidyPage(proj.nodes); autoInteract(); autoMotion(); } return; }
   // 有没量过的高列切图才异步量一次再配;没有(或环境不能解码图片,如离线体检)就直接同步配
@@ -1893,6 +1895,7 @@ function autoConfigureAll(){
   const all = proj.pages.filter(p => p.nodes.length);
   reconfigurePages(all);
   const links = proj.pages.length > 1 ? autoLinkPages() : [];
+  proj.autoRules = AUTO_RULES;
   renderAll(); autosave(); playPreview();
   toast((all.length > 1 ? `已为全部 ${all.length} 个页面重新配置动效与交互` : "已重新配置动效与交互") + (links.length ? `,连好 ${links.total != null ? links.total : links.length} 条跳转` : "")
     + linkSummary(links, pops).map(s => ";" + s).join("") + ";正在预览当前页(Ctrl+Z 可撤销)", 9000);
@@ -1999,6 +2002,7 @@ function applyTask(id, d, claim){
   history.length = 0; selId = null; thumbImgs.clear(); refImg.removeAttribute("src"); refImg.style.display = "none";
   renderTaskBtn(); renderAll(); fitStage();
   if (taskChan) taskChan.postMessage({type: claim ? "claim" : "who", id, tab: TAB_ID});
+  if (proj.autoRules && proj.autoRules !== AUTO_RULES) toast("自动配置规则更新过(这个任务是按旧规则配的):点「✦ 一键配动效」即可用上新规则(会覆盖手动改过的交互 / 动效,Ctrl+Z 可撤销)", 9000);
   if (!meta.thumb && projStats(proj).nodes) thumbTimer = setTimeout(() => saveThumb(id), 1500);
 }
 async function readTask(id){ try { return await IDB.get("task:" + id); } catch (e) { return null; } }
