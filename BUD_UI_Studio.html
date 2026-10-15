@@ -1291,6 +1291,7 @@ function loadPluginPackage(pkg){
     if (!pkg || pkg.format !== "bud-ui-studio/figma-export" || !Array.isArray(pkg.screens) || !pkg.screens.length)
       return showMsg("文件无法识别", "请选择 Figma 插件「BUD UI Studio 导出」生成的 <b>.budfig.json</b> 文件。");
     if (pkg.rules !== PLUGIN_RULES) toast(`导出包规则版本(${escHtml(pkg.rules || "未知")})与工作台(${PLUGIN_RULES})不一致,建议更新插件后重新导出`, 7000);
+    else if (!(pkg.features || []).includes("cornerRadius")) toast("这个导出包是旧版插件导出的,没有圆角信息:圆角卡片里的价格条等会显示成直角。在 Figma 里重新运行插件「发送到工作台」再导入即可", 9000);
     const images = {}; pkg.screens.forEach(s => Object.assign(images, s.images || {}));   // 节点 id 在同一文件内唯一,各界面的切图可以合并
     const render = async ids => { const out = {}; ids.forEach(id => { if (images[id]) out[id] = "data:image/png;base64," + images[id]; }); return out; };
     const frames = pkg.screens.map(s => s.frame);

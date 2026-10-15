@@ -322,6 +322,7 @@ async function doExport(ids) {
     format: "bud-ui-studio/figma-export",
     version: 1,
     rules: RULES,
+    features: ["cornerRadius"],   // 包里带了哪些后加的字段;工作台据此提示旧插件导出的包缺什么
     exportedAt: new Date().toISOString(),
     fileName: figma.root.name,
     screens: []
