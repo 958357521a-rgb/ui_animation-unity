@@ -131,3 +131,9 @@ BUD UI Studio 从 BUD_CHINA 主工程会话中拆出,作为独立项目继续开
 - 同日再追加:17:27 用户重发了 11 屏(多了 02 解锁通行证和改名的状态稿 06b 道具预览 / 06c 部件选中 / 07b 部件选中)。工作台现在把状态稿当底页的另一状态,自动连好点商品卡 → 道具预览、点部件 → 部件选中(再点选中项回底页);周页签等单选页签有选中切换;奖励列滑动区伸到两侧钉住的列底下;插件导出圆角、工作台按圆角裁(要在 Figma 里重新运行插件发送才带圆角;Unity 侧仍直角)。Figma 02 页「解锁立得」×15 / ×1000 下加了「钻石」「优优币」名称(528:2~528:5),数量挪到图标右侧。
 - 同日再追加:单行字统一上下居中(之前顶对齐会比底图低 4~5px);奖励轨道裁剪边对齐「福利总览」「50 级」看得见的实色边(量切图透明度,`asset.opq`)。Figma 里 01/03/04/05 的「xx/100经验」改为与进度槽左对齐、间距 11px(子代理改,节点 423:919 / 392:4342 / 388:4126 / 389:4184)。注意:旧工程(充值福利 92 处、签到 100 处、赛季累充 4 处)下次点一键配动效时,单行字也会改成上下居中。
 - 同日再追加:单选页签生成「选中态 / 常态」时对照普通项都有、选中项没有的装饰图(商品卡的价格条底,选中卡把黄条画进了选中底图):选中态去掉、常态补回;每次重拆前先还原旧的两层(AUTO_RULES 2026-10-15d)。Figma 02 页两张卡奖励格「紫钻」→「钻石」、「圆形代币」→「优优币」(380:3800/3908/3810/3918)。待用户定:豪华卡「解锁立得」上次加的名称(代币图下「钻石」、EXP 勋章下「优优币」)与图标对不上。
+
+## 2026-10-16 S18 赛季通行证替换进主工程(新赛季视图挂进原外壳)
+- 做法(用户选定):工作台 S18 模块(projects/S18SeasonPass.budui.json,由 10-15 19:00 插件包导入)导出为**子视图** `Assets/Loadable/UI/UIPanel/SeasonPassPanel/S18SeasonPass/S18SeasonPass.prefab`,脚本 `Assets/Scripts/UI/UIPanels/S18SeasonPass/`(GameUI 程序集);原入口 GameHall → NewSeasonPassPanel(290)不动,外壳加了 `ISeasonPassView` 分支(新文件 SeasonPassPanel/ISeasonPassView.cs + NewSeasonPassPanel.cs 小改,副本在 unity-reference/S18SeasonPass/_shell/);S17 的 SeasonPassConfig.json 只把 ViewPrefabPath 指向 S18(任务 id / 数据仍是 S17)。**切回旧版:把这一行改回 S17SeasonPass.prefab 即可。**备份:backups/20261016-111640。
+- 手写 Logic 在 unity-reference/S18SeasonPass/:公共(导航、找节点、复制模板)+ Reward(等级卡、经验条、领取 / 一键领取、购买等级 SkipSeasonConfirmPanel)+ Task(每日 / 每周 / 赛季任务、活跃度宝箱、周页签;每日 / 每周一键领取改为逐个调用已验证的单个领取)+ Shop(兑换商店、道具预览、部件、解锁通行证 PaySeasonPassByGem;奖品预览改开旧 PaidPackRewardPanel)。用 Unity 自带 Roslyn 对主工程 Library/ScriptAssemblies 编译通过;**没进游戏、没连服务端测过**。
+- 待用户确认:兑换礼包等级门槛沿用旧代码 25 级(稿子写 12 级);货币商品介绍 / 部件气泡是固定文案;赛季时间、活动时间文字没有数据来源保留原文;可领取态橙色与奖励页签红点位置要在真机看;每周页默认第一周;今日活跃度横条进度没做(整张图)。
+- 主工程改动未提交(由用户决定)。改 Logic 后重新写入:node 脚本思路同 s18apply(buildDelivery asSubView + 指定 prefab 路径 + logic + _shell),或工作台「覆盖到 Unity」选该 prefab。
