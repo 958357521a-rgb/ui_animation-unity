@@ -24,7 +24,10 @@ namespace Bud.S18SeasonPass
     /// 5. 加号:通行证币 → SeasonPassCoinPanel(钻石兑换),钻石 → 充值钻石页;问号 → 兑换商店规则(GashaponRulePanel)。
     /// 6. 主页「购买通行证」→ 第 1 页:两张卡奖励格 = 付费轨道全部奖励汇总(paidRewardList),价格 300 / 600(已买高级则豪华为差价 300);
     ///    已买的显示「已解锁」;点击 → 钻石不足弹 GetMoreGemsPanel,否则 IAPDataManager.PaySeasonPassByGem,成功弹奖励、重新取数并回主页。
-    /// 7. 主页 / 第 1 页的「奖品预览」→ 打开旧面板 PaidPackRewardPanel(3D 试穿),不再进第 8 页(第 8 / 9 页奖品格是整张拍平的图,无法填数据)。
+    /// 7. 主页 / 第 1 页的「奖品预览」→ View 原来的 OpenPage(8):奖品格 = GetSeasonPassRewardDatas(当前赛季, true)(S17 为 3 项),
+    ///    用设计稿格子底(选中项用 selected 底)按 4 列排开,每格叠图标 + 名称;设计稿拍平的「操作/预览…」整图隐藏。第一项默认选中;
+    ///    点格子 → 选中底移过去、右侧大图换成该奖品图标;套装 → 底部部件栏显示套装部件(pgcIds,同旧 RewardBundleList),单品 → 部件栏隐藏;
+    ///    点部件 → 第 9 页,选中框和气泡(部件名)对准该格;再点同一格回第 8 页。右上「兑换券」、标题不变。
     /// </summary>
     public partial class S18SeasonPassController
     {
@@ -49,6 +52,7 @@ namespace Bud.S18SeasonPass
         // ================= 挂钩 =================
         partial void ShopCreate()
         {
+            IconEnsureTable();   // 先记下设计稿图标(之后各模块才会替换图标)
             MessageHelper.AddListener(MessageName.SeasonExchangeGiftUpdate, ShopOnExchangeUpdate);
             MessageHelper.AddListener(MessageName.SeasonPassDataUpdate, ShopOnExchangeUpdate);
 
@@ -71,9 +75,9 @@ namespace Bud.S18SeasonPass
                 if (_shopPrimarySp == null) { var g = ImageAt(root, "Art/按钮底图/primary.png"); if (g != null) _shopPrimarySp = g.sprite; }
             }
 
-            // 奖品预览:旧版是 PaidPackRewardPanel(3D 试穿);第 8 页奖品格是拍平的整图,改为打开旧面板(换掉 View 的 OpenPage(8))
-            BindClick(view.GetButton("action2")?.transform, ShopOpenRewardPreview);
-            BindClick(view.GetButton("pageAction")?.transform, ShopOpenRewardPreview);
+            // 奖品预览(第 0 页 action2 / 第 1 页 pageAction)保留 View 原来的 OpenPage(8);第 8 / 9 页的奖品格在这里拼好
+            ShopGachaCreate(PageGacha);
+            ShopGachaCreate(PageGachaPart);
         }
 
         partial void ShopRefresh()
@@ -81,6 +85,7 @@ namespace Bud.S18SeasonPass
             SeasonPassExchangeSystem.Inst.ReqProductInfo();   // 回包广播 SeasonExchangeGiftUpdate → ShopOnExchangeUpdate
             ShopFillAll();
             ShopFillUnlock();
+            if (_shopCurPage == PageGacha || _shopCurPage == PageGachaPart) ShopFillGacha();
         }
 
         partial void ShopPageShown(int index)
@@ -89,6 +94,13 @@ namespace Bud.S18SeasonPass
             var prev = _shopCurPage;
             _shopCurPage = index;
             if (index == PageUnlock) { ShopFillUnlock(); return; }
+            if (index == PageGacha || index == PageGachaPart)
+            {
+                // 从别处进来:和旧 PaidPackRewardPanel.SetPreviewData 一样默认选第一项
+                if (prev != PageGacha && prev != PageGachaPart) { _shopGachaSel = 0; _shopGachaPart = -1; _shopGachaItems = null; }
+                ShopFillGacha();
+                return;
+            }
             if (Array.IndexOf(ShopPages, index) < 0) return;
             // 从商店外进来:和旧版 Def() 一样默认选第一个
             if (Array.IndexOf(ShopPages, prev) < 0) { _shopSel = 0; _shopPart = -1; SeasonPassExchangeSystem.Inst.ReqProductInfo(); }
@@ -218,9 +230,8 @@ namespace Bud.S18SeasonPass
                 var icon = ShopImageByPrefix(layer, "Art/图标/");
                 if (icon != null)
                 {
-                    icon.sprite = ShopItemIcon(info, icon.gameObject);
-                    icon.preserveAspect = true;
-                    icon.enabled = icon.sprite != null;
+                    ShopSetItemIcon(icon, info);
+                    IconRaiseTexts(layer, icon);
                 }
                 var gift = ImageAt(layer, "Art/图标/gift.svg");   // 设计稿礼包格多一层礼盒图
                 if (gift != null) gift.enabled = false;
@@ -244,7 +255,7 @@ namespace Bud.S18SeasonPass
             var first = info.RewardList?.FirstOrDefault();
             if (first == null) return;
             var big =ImageAt(root, "预览/物品大图");
-            if (big != null) { big.sprite = ShopRewardIcon(first, big.gameObject); big.preserveAspect = true; }
+            if (big != null) IconSet(big, first, false);
             var name = info.Gift ? info.Name : PgcUtils.GetRewardName(first.RewardType);
             SetText(TextAt(root, "文案/物品名称"), name);
             SetText(TextAt(root, "文案/物品介绍"), $"兑换获得{name}×{first.Count}，本赛季限兑 {info.Count} 次。");
@@ -258,8 +269,7 @@ namespace Bud.S18SeasonPass
             var character = ImageAt(root, "Art/图标/character.png");
             if (character != null && info.Gift)
             {
-                character.sprite = PgcUtils.LoadBundleIcon(info.BundleID, character.gameObject);
-                character.preserveAspect = true;
+                IconSetBundle(character, info.BundleID, false);
             }
 
             // 部件栏 = 礼包 RewardList(旧版 RewardGroup 展示的同一份列表)
@@ -281,7 +291,7 @@ namespace Bud.S18SeasonPass
                 {
                     var r = rewards[i];
                     var icon = ShopImageByPrefix(pool[i], "Art/图标/");
-                    if (icon != null) { icon.sprite = ShopRewardIcon(r, icon.gameObject); icon.preserveAspect = true; }
+                    if (icon != null) { IconSet(icon, r); IconRaiseTexts(pool[i], icon); }
                     SetText(ShopTextByPrefix(pool[i], "文案/数量"), "X" + r.Count);
                     var idx = i;
                     BindClick(pool[i], () => ShopSelectPart(idx));
@@ -377,15 +387,212 @@ namespace Bud.S18SeasonPass
             UIManager.Inst.OpenPanel(PanelId.SeasonPassUpPanel);
         }
 
-        // ================= 奖品预览(旧面板)=================
-        private void ShopOpenRewardPreview()
+        // ================= 奖品预览(第 8 / 9 页)=================
+        // 设计稿的奖品格是拍平的整图(「操作/预览…」),这里用格子底「at collection-cell (selected)」复制 N 个按 4 列排开,
+        // 每格叠一个图标(IconSet)和名称文字(从页面已有文字复制,字体合规)。数据照旧版奖品预览:GetSeasonPassRewardDatas(type, true)。
+        private sealed class ShopGachaUi
         {
-            var panel = UIManager.Inst.OpenPanel<PaidPackRewardPanel>(PanelId.PaidPackRewardPanel);
-            if (panel == null) return;
-            panel.bundleBgColorStr = "#FFFFFF";
-            panel.bundleContentBgColorStr = "#FF9B9B";
-            // 旧版还调 SetStyle(Texture2DBg):那张图在 Assets/Arts(不可按路径加载),这里沿用面板默认背景
-            panel.SetPreviewData(SeasonPassDataManager.Inst.GetSeasonPassRewardDatas(SeasonPassDataManager.Inst.CurrentSeasonPassType, true));
+            public Transform root;
+            public readonly List<Image> bgs = new List<Image>();
+            public readonly List<Image> icons = new List<Image>();
+            public readonly List<Text> names = new List<Text>();
+            public Sprite selSp, normalSp;
+        }
+
+        private readonly Dictionary<int, ShopGachaUi> _shopGacha = new Dictionary<int, ShopGachaUi>();
+        private readonly Dictionary<int, List<Transform>> _shopGachaParts = new Dictionary<int, List<Transform>>();
+        private List<PaidPackRewardData> _shopGachaItems;
+        private int _shopGachaSel, _shopGachaPart = -1;
+
+        private List<PaidPackRewardData> ShopGachaItems =>
+            _shopGachaItems ??= SeasonPassDataManager.Inst.GetSeasonPassRewardDatas(SeasonPassDataManager.Inst.CurrentSeasonPassType, true) ?? new List<PaidPackRewardData>();
+
+        /// <summary>第一次实例化时(页面还没显示、进场动效没跑)拼好奖品格,之后只换内容和显隐。</summary>
+        private void ShopGachaCreate(int page)
+        {
+            var root = PageRoot(page);
+            if (root == null || _shopGacha.ContainsKey(page)) return;
+            Transform sel = null;
+            var normals = new List<Transform>();
+            var previews = new List<Transform>();
+            for (int i = 0; i < root.childCount; i++)
+            {
+                var c = root.GetChild(i);
+                if (c.name == "at collection-cell selected") sel = c;
+                else if (c.name == "at collection-cell") normals.Add(c);
+                else if (c.name.StartsWith("操作/预览", StringComparison.Ordinal)) previews.Add(c);
+            }
+            var first = sel != null ? sel : (normals.Count > 0 ? normals[0] : null);
+            if (first == null) return;
+            var ui = new ShopGachaUi { root = root };
+            var selImg = sel != null ? sel.GetComponent<Image>() : null;
+            var normImg = normals.Count > 0 ? normals[0].GetComponent<Image>() : null;
+            ui.normalSp = normImg != null ? normImg.sprite : (selImg != null ? selImg.sprite : null);
+            ui.selSp = selImg != null ? selImg.sprite : ui.normalSp;
+            var basePos = ((RectTransform)first).anchoredPosition;
+            var dx = normals.Count > 0 && normals[0] != first ? StepBetween(first, normals[0]) : new Vector2(279, 0);
+            var dy = previews.Count > 4 ? StepBetween(previews[0], previews[4]).y : -226f;
+            foreach (var p in previews) SetActive(p, false);   // 拍平的整图不要了
+
+            var pool = new List<Transform>();
+            if (sel != null) pool.Add(sel);
+            pool.AddRange(normals);
+            int count = ShopGachaItems.Count;
+            var cloneSrc = normals.Count > 0 ? normals[0] : first;
+            while (pool.Count < count)
+            {
+                var go = Instantiate(cloneSrc.gameObject, root, false);
+                go.name = "at collection-cell";
+                go.transform.SetSiblingIndex(pool[pool.Count - 1].GetSiblingIndex() + 1);
+                pool.Add(go.transform);
+            }
+            var textSrc = TextAt(PageRoot(PageGachaPart), "文案/部件名称") ?? TextAt(root, "文案/套装部件");
+            for (int i = 0; i < pool.Count; i++)
+            {
+                var cell = (RectTransform)pool[i];
+                cell.anchoredPosition = basePos + dx * (i % 4) + new Vector2(0, dy) * (i / 4);
+                SetActive(cell, i < count);
+                var bg = cell.GetComponent<Image>();
+                if (bg == null) continue;
+                bg.raycastTarget = true;
+                var btn = cell.GetComponent<Button>();
+                if (btn == null) { btn = cell.gameObject.AddComponent<Button>(); btn.transition = Selectable.Transition.None; }
+                var idx = i;
+                BindClick(cell, () => ShopGachaSelect(idx));
+                // 格子底四周各 32 的投影留白(设计稿格子底 315×274,内容区 251×210)
+                float w = Mathf.Max(10, cell.rect.width - 64), h = Mathf.Max(10, cell.rect.height - 64);
+                var icon = ShopGachaChild<Image>(cell, "Gacha/图标", new Vector2(w * 0.72f, h * 0.64f), new Vector2(0, h * 0.5f - 8 - h * 0.32f));
+                icon.raycastTarget = false;
+                Text name = null;
+                if (textSrc != null)
+                {
+                    var tgo = Instantiate(textSrc.gameObject, cell, false);
+                    tgo.name = "Gacha/名称";
+                    foreach (var m in tgo.GetComponents<S18SeasonPassMotion>()) Destroy(m);
+                    foreach (var m in tgo.GetComponents<S18SeasonPassClickFeedback>()) Destroy(m);
+                    var rt = (RectTransform)tgo.transform;
+                    rt.anchorMin = rt.anchorMax = rt.pivot = new Vector2(0.5f, 0.5f);
+                    rt.sizeDelta = new Vector2(w - 16, h * 0.24f);
+                    rt.anchoredPosition = new Vector2(0, -h * 0.5f + 6 + h * 0.12f);
+                    rt.localScale = Vector3.one;
+                    name = tgo.GetComponent<Text>();
+                    name.alignment = TextAnchor.MiddleCenter;
+                    name.horizontalOverflow = HorizontalWrapMode.Wrap;
+                    name.resizeTextForBestFit = true;
+                    name.resizeTextMinSize = 14;
+                    name.resizeTextMaxSize = Mathf.Max(16, textSrc.fontSize);
+                    name.raycastTarget = false;
+                    name.transform.SetAsLastSibling();
+                }
+                ui.bgs.Add(bg); ui.icons.Add(icon); ui.names.Add(name);
+            }
+            _shopGacha[page] = ui;
+        }
+
+        private static T ShopGachaChild<T>(RectTransform parent, string name, Vector2 size, Vector2 pos) where T : Graphic
+        {
+            var go = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer), typeof(T));
+            go.layer = parent.gameObject.layer;
+            var rt = (RectTransform)go.transform;
+            rt.SetParent(parent, false);
+            rt.anchorMin = rt.anchorMax = rt.pivot = new Vector2(0.5f, 0.5f);
+            rt.sizeDelta = size;
+            rt.anchoredPosition = pos;
+            return go.GetComponent<T>();
+        }
+
+        private void ShopFillGacha()
+        {
+            if (view == null) return;
+            if (_shopGachaSel < 0 || _shopGachaSel >= ShopGachaItems.Count) _shopGachaSel = 0;
+            ShopGachaFillPage(PageGacha);
+            ShopGachaFillPage(PageGachaPart);
+        }
+
+        private void ShopGachaFillPage(int page)
+        {
+            if (!_shopGacha.TryGetValue(page, out var ui)) { ShopGachaCreate(page); if (!_shopGacha.TryGetValue(page, out ui)) return; }
+            var items = ShopGachaItems;
+            for (int i = 0; i < ui.bgs.Count; i++)
+            {
+                var on = i < items.Count;
+                SetActive(ui.bgs[i].transform, on);
+                if (!on) continue;
+                var s = i == _shopGachaSel ? ui.selSp : ui.normalSp;
+                if (s != null) ui.bgs[i].sprite = s;
+                IconSet(ui.icons[i], items[i], false);
+                SetText(ui.names[i], items[i].name);
+            }
+            var cur = _shopGachaSel < items.Count ? items[_shopGachaSel] : null;
+            var character = ImageAt(ui.root, "Art/图标/character.png");
+            if (character != null && cur != null) IconSet(character, cur, false);   // 保持设计稿大图区域,preserveAspect
+
+            // 部件栏:套装 → 套装部件(pgcIds,同旧 RewardBundleList.SetTarget);单品 → 隐藏
+            var tray = FindDeep(ui.root, "at parts-tray");
+            var pgcs = cur != null && cur.isBundle && cur.pgcIds != null ? cur.pgcIds : new List<string>();
+            SetActive(tray, pgcs.Count > 0);
+            if (pgcs.Count == 0)
+            {
+                if (page == PageGachaPart) { SetActive(FindDeep(ui.root, "部件介绍气泡"), false); SetActive(FindDeep(ui.root, "部件选中框"), false); }
+                return;
+            }
+            var content = FindPath(tray, "部件列表 · 可滑动|内容");
+            if (!_shopGachaParts.TryGetValue(page, out var pool))
+            {
+                pool = new List<Transform>();
+                if (content != null)
+                    for (int i = 0; i < content.childCount; i++)
+                        if (content.GetChild(i).name.StartsWith("操作/预览部件", StringComparison.Ordinal)) pool.Add(content.GetChild(i));
+                _shopGachaParts[page] = pool;
+            }
+            if (pool.Count == 0) return;
+            var step = pool.Count > 1 ? StepBetween(pool[0], pool[1]) : new Vector2(162, 0);
+            EnsureClones(pool[0], pgcs.Count, step, pool);
+            for (int i = 0; i < pgcs.Count && i < pool.Count; i++)
+            {
+                var icon = ShopImageByPrefix(pool[i], "Art/图标/");
+                if (icon != null) { IconSetPgc(icon, pgcs[i]); IconRaiseTexts(pool[i], icon); }
+                SetText(ShopTextByPrefix(pool[i], "文案/数量"), "X1");
+                var idx = i;
+                BindClick(pool[i], () => ShopGachaSelectPart(idx));
+            }
+            FitContent(content, pool[Math.Max(0, Math.Min(pgcs.Count, pool.Count) - 1)], true);
+
+            // 第 9 页:选中框 / 气泡对准选中部件(同商店第 7 页)
+            if (page != PageGachaPart) return;
+            var frame = FindDeep(ui.root, "部件选中框");
+            var bubble = FindDeep(ui.root, "部件介绍气泡");
+            bool has = _shopGachaPart >= 0 && _shopGachaPart < pgcs.Count && _shopGachaPart < pool.Count;
+            SetActive(frame, has);
+            SetActive(bubble, has);
+            if (!has) return;
+            var cell = (RectTransform)pool[_shopGachaPart];
+            if (frame != null) { frame.SetAsLastSibling(); ShopAlignX(frame, frame, cell, true); }
+            if (bubble != null) ShopAlignX(bubble, FindDeep(bubble, "尖角"), cell, false);
+            var id = pgcs[_shopGachaPart];
+            var partName = SeasonPassDataManager.Inst.GetPgcName(id);
+            if (string.IsNullOrEmpty(partName)) partName = PgcUtils.GetEmoteName(id);
+            var nameText = TextAt(ui.root, "文案/部件名称");
+            SetText(nameText, partName);
+            if (nameText != null) nameText.horizontalOverflow = HorizontalWrapMode.Overflow;
+            SetText(TextAt(ui.root, "文案/部件介绍"), "套装部件之一，集齐后可激活完整套装外观。");
+        }
+
+        private void ShopGachaSelect(int index)
+        {
+            if (index < 0 || index >= ShopGachaItems.Count) return;
+            _shopGachaSel = index;
+            _shopGachaPart = -1;
+            if (_shopCurPage == PageGachaPart) view.SwitchPage(PageGacha);   // ShopPageShown → ShopFillGacha
+            else ShopFillGacha();
+        }
+
+        private void ShopGachaSelectPart(int index)
+        {
+            if (_shopCurPage == PageGachaPart && index == _shopGachaPart) { _shopGachaPart = -1; view.SwitchPage(PageGacha); return; }
+            _shopGachaPart = index;
+            if (_shopCurPage != PageGachaPart) view.SwitchPage(PageGachaPart);
+            else ShopFillGacha();
         }
 
         // ================= 解锁通行证(第 1 页)=================
@@ -462,10 +669,8 @@ namespace Bud.S18SeasonPass
                 var icon = ShopImageByPrefix(cell, "Art/图标/");
                 if (icon != null)
                 {
-                    var iconName = info.IconName();
-                    icon.sprite = string.IsNullOrEmpty(iconName) ? null : XAssetLoaderMgr.Inst.LoadSpriteInAltas(ShopPassAtlas, iconName, icon.gameObject);
-                    icon.preserveAspect = true;
-                    icon.enabled = icon.sprite != null;
+                    IconSet(icon, info);
+                    IconRaiseTexts(cell, icon);   // ×数量 / 名称文字压在图标上层(只调层级,不改大小)
                 }
                 var texts = cell.GetComponentsInChildren<Text>(true);
                 if (texts.Length > 0) SetText(texts[0], "×" + sum[key]);
@@ -554,16 +759,10 @@ namespace Bud.S18SeasonPass
             return first == null ? info.Name : $"{info.Name}×{first.Count}";
         }
 
-        private static Sprite ShopItemIcon(SeasonExchangeConfig info, GameObject owner)
+        private void ShopSetItemIcon(Image icon, SeasonExchangeConfig info)
         {
-            if (info.Gift) return PgcUtils.LoadBundleIcon(info.BundleID, owner);
-            var first = info.RewardList?.FirstOrDefault();
-            return first == null ? null : PgcUtils.LoadRewardIcon(first.RewardType, owner);
-        }
-
-        private static Sprite ShopRewardIcon(SeasonExchangeConfigItem r, GameObject owner)
-        {
-            return r.RewardType == BUDRewardType.RewardPgcResource ? PgcUtils.GetIconSpriteByPgcId(r.PgcID.ToString(), owner) : PgcUtils.LoadRewardIcon(r.RewardType, owner);
+            if (info.Gift) { IconSetBundle(icon, info.BundleID); return; }
+            IconSet(icon, info.RewardList?.FirstOrDefault());
         }
 
         private static string ShopRewardName(SeasonExchangeConfigItem r)

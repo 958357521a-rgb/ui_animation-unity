@@ -358,16 +358,9 @@ namespace Bud.S18SeasonPass
                 var r = rewards[c];
                 var icon = TaskCellIcon(cells[c]);
                 var qty = TaskEnsureQtyText(cells[c]);
-                if (r.rewardType == BUDRewardType.RewardPgcResource)
-                {
-                    SetText(qty, r.rewardName);
-                    if (icon != null) PgcUtils.GetIconSpriteByPgcIdAsync(r.pgcId, gameObject, sp => { if (icon != null && sp != null) icon.sprite = sp; });
-                }
-                else
-                {
-                    if (icon != null) { var sp = PgcUtils.LoadRewardIcon(r.rewardType, gameObject); if (sp != null) icon.sprite = sp; }
-                    SetText(qty, "×" + r.rewardAmount);
-                }
+                // 图标统一走 IconSet:设计稿新图标优先(活跃度 / 金币 / 经验…),时装等才用服务端图标;保持设计稿矩形
+                if (icon != null) { IconSet(icon, r); IconRaiseTexts(cells[c], icon); }
+                SetText(qty, r.rewardType == BUDRewardType.RewardPgcResource ? r.rewardName : "×" + r.rewardAmount);
                 for (int k = 0; k < cells[c].childCount; k++)
                     if (cells[c].GetChild(k).name.Contains("status_locked")) SetActive(cells[c].GetChild(k), c == 1 && locked2nd);
             }
@@ -489,10 +482,8 @@ namespace Bud.S18SeasonPass
             if (!sib.name.StartsWith("Art/", StringComparison.Ordinal)) return;
             var img = sib.GetComponent<Image>();
             if (img == null) return;
-            var r = info.rewardList[0];
-            if (r.rewardType == BUDRewardType.RewardPgcResource)
-                PgcUtils.GetIconSpriteByPgcIdAsync(r.pgcId, gameObject, sp => { if (img != null && sp != null) img.sprite = sp; });
-            else { var sp = PgcUtils.LoadRewardIcon(r.rewardType, gameObject); if (sp != null) img.sprite = sp; }
+            // 统一走 IconSet:设计稿新图标优先、保持设计稿矩形(五个宝箱图标大小一致);宝箱按钮(含 ×数量文字)本来就在图标后面,压在图标上层
+            IconSet(img, info.rewardList[0]);
         }
 
         private void TaskClickChest(string taskId, int eventId)

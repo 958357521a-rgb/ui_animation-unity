@@ -315,17 +315,17 @@ namespace Bud.S18SeasonPass
             RewardSetStatus(FindPath(card, "切图/状态底_12级"), TextAt(card, "文案/已领取"), free, paid, isPaid);
         }
 
-        private static void RewardSetIcon(Transform root, string path, SeasonPassItemInfo data)
+        /// <summary>奖励图标:统一走 IconSet(设计稿新图标优先,其次旧版图集;保持设计稿矩形),数量文字放到图标上层。</summary>
+        private void RewardSetIcon(Transform root, string path, SeasonPassItemInfo data)
         {
             var t = FindPath(root, path);
             if (t == null) return;
             SetActive(t, data != null);
             if (data == null) return;
             var img = t.GetComponent<Image>();
-            var iconName = data.IconName();
-            if (img == null || string.IsNullOrEmpty(iconName)) return;
-            var sp = XAssetLoaderMgr.Inst.LoadSpriteInAltas(RewardAtlasPath, iconName, t.gameObject);
-            if (sp != null) { img.sprite = sp; img.preserveAspect = true; }
+            if (img == null) return;
+            IconSet(img, data);
+            IconRaiseTexts(root, img);
         }
 
         private static string RewardAmountText(SeasonPassItemInfo data)

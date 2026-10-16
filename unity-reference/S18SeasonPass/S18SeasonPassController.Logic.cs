@@ -196,6 +196,17 @@ namespace Bud.S18SeasonPass
             pool = pool ?? new List<Transform>();
             if (template == null) return pool;
             if (pool.Count == 0) pool.Add(template);
+            // 进场动效是在当前位置上叠加偏移的:先停掉模板和已有实例的动效(OnDisable 会把偏移 / 缩放 / 透明度复原),
+            // 再读位置、复制、摆位,最后统一重新开启(从摆好的位置重新播进场)。否则读到的是动画中途的位置,复制出来会错位
+            // 已经摆过、数量也够:只切显隐(平时刷新数据不重排、不重播进场;重新显示的那几个从摆好的位置播进场)
+            if (s_laidOut.Contains(pool) && pool.Count >= count)
+            {
+                for (int i = 0; i < pool.Count; i++) SetActive(pool[i], i < count);
+                return pool;
+            }
+            s_laidOut.Add(pool);
+            var paused = new List<Behaviour>();
+            foreach (var t in pool) PauseMotions(t, paused);
             var basePos = ((RectTransform)template).anchoredPosition;
             while (pool.Count < count)
             {
@@ -211,7 +222,21 @@ namespace Bud.S18SeasonPass
                 SetActive(pool[i], on);
                 if (on) ((RectTransform)pool[i]).anchoredPosition = basePos + step * i;
             }
+            // 新复制的实例带着模板「已停用」的动效组件:一并开启
+            for (int i = 0; i < pool.Count; i++)
+                foreach (var m in pool[i].GetComponentsInChildren<S18SeasonPassMotion>(true)) if (!m.enabled && !paused.Contains(m)) paused.Add(m);
+            foreach (var m in paused) if (m != null) m.enabled = true;
             return pool;
+        }
+
+        // 摆过位的实例池(按池子对象区分;视图销毁后池子随之不可达,集合里留个引用无妨)
+        private static readonly HashSet<List<Transform>> s_laidOut = new HashSet<List<Transform>>();
+
+        private static void PauseMotions(Transform root, List<Behaviour> into)
+        {
+            if (root == null) return;
+            foreach (var m in root.GetComponentsInChildren<S18SeasonPassMotion>(true))
+                if (m.enabled) { m.enabled = false; into.Add(m); }
         }
 
         /// <summary>两个设计实例之间的位置差(如 列_12级 → 列_13级),做 EnsureClones 的 step。</summary>
@@ -226,6 +251,15 @@ namespace Bud.S18SeasonPass
         {
             if (content == null || last == null) return;
             var c = (RectTransform)content; var l = (RectTransform)last;
+            // 生成的节点多是居中锚点:改内容尺寸时子节点会跟着平移半个增量(列表整体滑出可视区)→ 记下子节点世界坐标,改完放回
+            var kids = new List<(Transform t, Vector3 p)>();
+            for (int i = 0; i < c.childCount; i++) kids.Add((c.GetChild(i), c.GetChild(i).position));
+            try { FitContentCore(c, l, horizontal, tailPadding); }
+            finally { foreach (var k in kids) k.t.position = k.p; }
+        }
+
+        private static void FitContentCore(RectTransform c, RectTransform l, bool horizontal, float tailPadding)
+        {
             var corners = new Vector3[4]; l.GetWorldCorners(corners);   // 0 左下 1 左上 2 右上 3 右下
             if (horizontal)
             {

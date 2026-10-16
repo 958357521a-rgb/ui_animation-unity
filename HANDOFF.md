@@ -137,3 +137,4 @@ BUD UI Studio 从 BUD_CHINA 主工程会话中拆出,作为独立项目继续开
 - 手写 Logic 在 unity-reference/S18SeasonPass/:公共(导航、找节点、复制模板)+ Reward(等级卡、经验条、领取 / 一键领取、购买等级 SkipSeasonConfirmPanel)+ Task(每日 / 每周 / 赛季任务、活跃度宝箱、周页签;每日 / 每周一键领取改为逐个调用已验证的单个领取)+ Shop(兑换商店、道具预览、部件、解锁通行证 PaySeasonPassByGem;奖品预览改开旧 PaidPackRewardPanel)。用 Unity 自带 Roslyn 对主工程 Library/ScriptAssemblies 编译通过;**没进游戏、没连服务端测过**。
 - 待用户确认:兑换礼包等级门槛沿用旧代码 25 级(稿子写 12 级);货币商品介绍 / 部件气泡是固定文案;赛季时间、活动时间文字没有数据来源保留原文;可领取态橙色与奖励页签红点位置要在真机看;每周页默认第一周;今日活跃度横条进度没做(整张图)。
 - 主工程改动未提交(由用户决定)。改 Logic 后重新写入:node 脚本思路同 s18apply(buildDelivery asSubView + 指定 prefab 路径 + logic + _shell),或工作台「覆盖到 Unity」选该 prefab。
+- 10-16 第二轮(用户在 Unity 里跑后反馈):列表撑开时居中锚点子节点平移(奖励列空白、任务行 / 商品格沉底)→ 公共 FitContent 保持子节点世界坐标;EnsureClones 摆位前暂停动效、只在需要重排时才重排;新增 Icons.Logic.cs(设计稿新图标优先、缩进格子);奖品预览改用新第 8 / 9 页并填数据;生成器支持 Unity 圆角裁剪(通行证卡左上角、商品格价格条)。已重新写入主工程(备份 backups/20261016-114627)。
