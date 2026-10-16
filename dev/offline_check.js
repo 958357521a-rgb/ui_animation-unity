@@ -50,7 +50,7 @@ function check() {
   // 稳定 ID:再生成一次必须逐字节相同;把这份当"主工程里的旧 prefab"解析回 ID 再生成,也必须相同(覆盖时沿用旧 ID 的路径)
   const again = buildDelivery(mod);
   ok(again.prefabYaml === y && again.assets.every((a, i) => a.meta === del.assets[i].meta && a.path === del.assets[i].path), "再次导出 GUID / fileID 完全不变");
-  const kinds = { [UGUI.image]: "img", [UGUI.text]: "txt", [UGUI.button]: "btn", [UGUI.scrollRect]: "sr", [UGUI.rectMask2D]: "mask", [del.guids.view]: "view", [del.guids.motion]: "motion", [del.guids.press]: "press" };
+  const kinds = { [UGUI.image]: "img", [UGUI.text]: "txt", [UGUI.button]: "btn", [UGUI.scrollRect]: "sr", [UGUI.rectMask2D]: "mask", [UGUI.mask]: "rmask", [del.guids.view]: "view", [del.guids.motion]: "motion", [del.guids.press]: "press" };
   ok(buildDelivery(mod, { fidHints: null, existing: {} }).prefabYaml === y, "覆盖到 Unity 新建目标(主工程里还没有旧 prefab)与导出结果一致");
   const old = prefabIdHints(y, kinds), relabeled = buildDelivery(mod, { fidHints: old.hints });
   ok(relabeled.prefabYaml === y && !old.custom.length, `按旧 prefab 层级路径沿用 fileID:${Object.keys(old.hints).length} 个对象全部对上`);
