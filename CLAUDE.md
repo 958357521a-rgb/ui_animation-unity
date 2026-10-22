@@ -11,6 +11,10 @@
 
 本文件夹是一个**本地单文件 Web 应用**(`BUD_UI_Studio.html`,零依赖):可视化摆布局 + 配动效,直接生成 BUD_CHINA 主工程可用的 Unity 预制体交付包(`.unitypackage`:prefab/贴图/视图脚本连同 meta,落点按规范写在包里,见 `pkgDirs`;`makeUnityPackage` = gzip 压缩的 tar,每个资产一个 GUID 目录含 asset/asset.meta/pathname,浏览器原生 CompressionStream 压缩)。回复一律使用简体中文。
 
+## 省 token(每个会话都照做)
+
+2026-10-22 原作者要求:同事 token 消耗太快(习惯截图说明修改、一次给很多参考图,本机已配好 nano banana API 生图,Claude 连 Figma 改素材)。**不要求她改习惯**:这一轮只要涉及图片、截图、参考图、生图、Figma 读写,或对话已经很长,**先加载 skill `save-tokens`**(`.claude/skills/save-tokens/SKILL.md`)照做。最要紧的三条:生图结果只存文件、对话里只留路径、用发文件给她看;参考图看一次就写成风格卡 `docs/风格卡/`;Figma 先 get_metadata,截图只在最后验收时截改动的节点。工具在 `dev/lite/`,给人看的说明 `docs/省token说明.md`。
+
 ## 改这个软件时必须知道的事
 
 - **生成模板是逐字段对齐主工程的**(Unity 2022.3.32f1 原生序列化,2026-09-29 从 `E:\BUDGCB\BUD_CHINA` 真实资产提取):Image/Text/Button/CanvasRenderer/RectTransform 块、TextureImporter/MonoImporter/PrefabImporter meta。改模板前先去主工程对照同类资产,不要凭记忆改字段。

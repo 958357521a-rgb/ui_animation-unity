@@ -20,3 +20,6 @@ desktop.ini
 # Figma 插件配对码、资源批处理的本机设置(主工程路径)
 dev/bridge_key.txt
 dev/pipeline/settings.local.json
+
+# nano banana 生图的 API Key(每台电脑自己的)
+dev/lite/nano.local.json
