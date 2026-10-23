@@ -1,0 +1,8 @@
+{
+  "_说明": "复制一份改名为 nano.local.json(不进仓库),填上自己的 key。用官方接口就不用改 base_url;用中转地址就改成中转的地址,中转要求 Bearer 头就把 auth 改成 bearer,要求 ?key= 就改成 query。模型:nano banana = gemini-2.5-flash-image,nano banana pro = gemini-3-pro-image-preview(以接口方当前支持的名字为准)。",
+  "api_key": "",
+  "base_url": "https://generativelanguage.googleapis.com",
+  "model": "gemini-2.5-flash-image",
+  "auth": "header",
+  "timeout": 180
+}

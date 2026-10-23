@@ -23,3 +23,6 @@ dev/pipeline/settings.local.json
 
 # 其他会话的原始记录归档(含完整对话,只留本机)
 docs/会话归档/
+
+# nano banana 生图的 API Key(每台电脑自己的)
+dev/lite/nano.local.json
