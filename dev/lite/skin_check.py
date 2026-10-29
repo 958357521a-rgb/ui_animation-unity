@@ -141,6 +141,24 @@ def composite(layers, W, H):
     return out
 
 
+SPLIT_MIN = 0.35   # 10-29 量:通过的完成稿 S 级歌姬 0.39 / 中秋 0.45 / 机甲 0.48 / 异星 0.84;被指割裂的 A 级录音棚小样 0.29
+
+
+def split_ratio(a):
+    """背景左右是否割裂:导航以上,右侧底板区(x≥1100)和左侧主题区(x<880)的局部细节(亮度梯度均值)之比。
+    连续场景的右侧只是更静,比值不会太低;右侧是平涂空板时接近 0。"""
+    L = lum(a[:1017])
+    g = np.abs(np.diff(L, axis=1))[:-1] + np.abs(np.diff(L, axis=0))[:, :-1]
+    left, right = g[:, :880].mean(), g[:, 1100:].mean()
+    return float(right / max(left, 1e-6))
+
+
+def split_file(p):
+    a = load(p)
+    if a.shape[1] != 2436: a = np.asarray(Image.fromarray((a * 255).astype(np.uint8)).resize((2436, 1125)), np.float32) / 255
+    return split_ratio(a)
+
+
 # ---------- 一个分区 ----------
 def measure_section(d):
     r = {'name': os.path.basename(d), 'kind': kind_of(os.path.basename(d)), 'fail': [], 'warn': [], 'm': {}}
@@ -228,6 +246,10 @@ def measure_section(d):
         amt, reach = shadow(S1); r['m']['投影量'] = amt; r['m']['投影伸出'] = reach
         if amt < 0.8 or reach < 15:
             r['fail'].append(f'底板投影太弱:投影量 {amt:.1f}、伸出 {reach}px(机甲 R3 通过版 ≈1.9 / 33px;10-26「所有信息底板都得加上投影」)')
+    if k == '主页背景':
+        lr = split_ratio(S1); r['m']['右左细节比'] = lr
+        if lr < SPLIT_MIN:
+            r['warn'].append(f'右侧(底板区)细节只有左侧的 {lr:.0%},可能左右割裂、右边是平涂空板(10-29:背景要整屏连续)')
     r['m']['配色'] = color_stats(S1)
     r['static'] = S1
     return r
