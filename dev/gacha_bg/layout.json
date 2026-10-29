@@ -1,0 +1,45 @@
+{
+  "source": "Figma S18 951:2402「机翼扭蛋 1」,2026-10-29 从 get_metadata 读出,坐标为画板内像素,原点左上",
+  "canvas": [2436, 1125],
+  "zones": [
+    {"key": "left_tabs",   "name": "左侧期数列表",   "rect": [94, 109, 376, 950],   "kind": "ui"},
+    {"key": "back",        "name": "返回 + 扭蛋页签", "rect": [0, 0, 430, 110],     "kind": "ui"},
+    {"key": "info",        "name": "叹号",           "rect": [434, 21, 112, 112],   "kind": "ui"},
+    {"key": "time",        "name": "活动时间",       "rect": [595, 51, 499, 43],    "kind": "ui"},
+    {"key": "title",       "name": "标题 Logo",      "rect": [420, 19, 771, 350],   "kind": "title"},
+    {"key": "video",       "name": "视频预览 + x1",  "rect": [1124, 48, 99, 149],   "kind": "ui"},
+    {"key": "preview",     "name": "奖励预览",       "rect": [1599, 19, 127, 139],  "kind": "ui"},
+    {"key": "currency",    "name": "货币栏",         "rect": [1821, 27, 545, 67],   "kind": "ui"},
+    {"key": "gift",        "name": "特惠礼包",       "rect": [2254, 141, 128, 147], "kind": "ui"},
+    {"key": "model",       "name": "角色模型",       "rect": [1029, 140, 511, 720], "kind": "focus"},
+    {"key": "reward_tl",   "name": "奖励·左上",      "rect": [560, 346, 229, 232],  "kind": "reward"},
+    {"key": "reward_bl",   "name": "奖励·左下",      "rect": [739, 590, 229, 232],  "kind": "reward"},
+    {"key": "reward_tr",   "name": "奖励·右上",      "rect": [1723, 346, 229, 232], "kind": "reward"},
+    {"key": "reward_br",   "name": "奖励·右下",      "rect": [1541, 590, 229, 232], "kind": "reward"},
+    {"key": "btn_once",    "name": "抽取 1 次",      "rect": [641, 882, 531, 172],  "kind": "button"},
+    {"key": "btn_round",   "name": "抽取 1 轮",      "rect": [1252, 882, 531, 172], "kind": "button"},
+    {"key": "note",        "name": "说明文字",       "rect": [808, 1043, 808, 38],  "kind": "ui"},
+    {"key": "skip",        "name": "跳过动画",       "rect": [1959, 988, 301, 59],  "kind": "ui"}
+  ],
+  "targets": {
+    "note": "从圣羽降临干净背景量出(亮部 92% / 饱和色 28% 集中在 210° / 几乎无暗部),留出余量;某一期要放宽在风格卡里写明",
+    "light_min": 0.60,
+    "dark_max": 0.10,
+    "sat_max": 0.45,
+    "main_hue_share_of_sat_min": 0.60,
+    "accent_min": 0.02,
+    "accent_max": 0.12,
+    "focus_lum": [55, 92],
+    "busy_ratio_fail": 1.8,
+    "busy_ratio_warn": 1.4
+  },
+  "structure": {
+    "note": "以下按圣羽降临干净背景目测(±20px),zones 是 Figma 实数",
+    "model_center_x": 1284,
+    "horizon_y": 570,
+    "stage_ellipse": [290, 730, 1900, 370],
+    "frame_left": [470, 120, 540, 680],
+    "frame_right": [1760, 120, 676, 800],
+    "character_slot": [1960, 260, 420, 480]
+  }
+}
