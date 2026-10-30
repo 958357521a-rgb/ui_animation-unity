@@ -24,6 +24,8 @@ BOARDS = ('个人信息底板', '窄底板', '中底板', '宽底板')
 LAYOUT_X0, LAYOUT_Y, GAP, NAV_Y = 880, 78, 50, 1017   # 第一张底板看得见的左边缘 / 上沿 / 间距 / 导航 y
 DECO_ROLES = ('ornament', 'deco')
 MOTION_OK = ('static', 'swing', 'float', 'drift')
+SCRAP_WARN, SCRAP_FAIL = 0.015, 0.05      # 部件和底框同色同位的占比(10-30 虚拟歌姬:v2 飘带 31.5% / 格子旗 6.9% ✗;v3 独立件 ≤5%,粉星压粉框会到 2~5%)
+RAGGED_WARN, RAGGED_FAIL = 0.12, 0.25     # 部件轮廓细刺 / 毛边(v2 挂带 0.39 ✗;v3 全部 <0.12)
 
 
 def load(p):
@@ -73,13 +75,35 @@ def straight_cuts(a, minlen=12):
         A = al if axis == 0 else al.T
         hi, lo = A[:-1] > 0.6, A[1:] < 0.05          # 往下 / 往右掉
         hi2, lo2 = A[1:] > 0.6, A[:-1] < 0.05        # 往上 / 往左掉
-        for M in (hi & lo, hi2 & lo2):
+        # 缩小出来的切边有 1 像素过渡,隔一格掉下去也算(10-30 v2 的飘带直切口一步判不出)
+        s1, s2 = (A[:-2] > 0.6) & (A[2:] < 0.05), (A[2:] > 0.6) & (A[:-2] < 0.05)
+        s1 = np.vstack([s1, np.zeros_like(s1[:1])]) & ~(hi & lo); s2 = np.vstack([s2, np.zeros_like(s2[:1])]) & ~(hi2 & lo2)
+        for M in (hi & lo, hi2 & lo2, s1, s2):
             M = M.copy(); M[:, :1] = False; M[:, -1:] = False
             lab, n = ndimage.label(M, structure=[[0, 0, 0], [1, 1, 1], [0, 0, 0]])
             if not n: continue
             ln = ndimage.sum_labels(M, lab, range(1, n + 1))
             runs += [int(x) for x in ln if x >= minlen]
     return len(runs), (max(runs) if runs else 0)
+
+
+def frame_scrap(part, base):
+    """部件带走底框碎片(10-30 用户:音响带着框条、星星下面挂着框描边):部件实心处和底框同位置颜色几乎一样、
+    连成 ≥30px(2x)的块 —— 那是从效果图里连底框一起抠下来的。返回占部件面积比例。"""
+    m = (part[..., 3] > 0.9) & (base[..., 3] > 0.9) & (np.abs(part[..., :3] - base[..., :3]).max(-1) < 0.07)
+    m = ndimage.binary_opening(m)
+    lab, n = ndimage.label(m)
+    if n: m = np.isin(lab, 1 + np.where(ndimage.sum_labels(m, lab, range(1, n + 1)) >= 30)[0])
+    return float(m.sum() / max((part[..., 3] > 0.5).sum(), 1))
+
+
+def ragged(a):
+    """边缘发毛:部件轮廓上宽 ≤4px(2x)的细刺 / 毛边像素,占轮廓长度的比例(干净的独立小件描边粗、轮廓顺,接近 0)。"""
+    m = a[..., 3] > 0.5
+    rim = (m & ~ndimage.binary_erosion(m)).sum()
+    if rim < 50: return 0.0
+    spur = m & ~ndimage.binary_opening(m, iterations=2)
+    return float(spur.sum() / rim)
 
 
 def fragments(a):
@@ -207,7 +231,8 @@ def measure_section(d):
         lay1.append((l, im, l2, im2))
         if l.get('role') in DECO_ROLES:
             n, mx = straight_cuts(im2 if im2 is not None else im, 24 if im2 is not None else 12)
-            if n >= 3: r['fail'].append(f'部件「{l["name"]}」有 {n} 条硬切直边(最长 {mx}px),像被框裁过')
+            moving = (l.get('motion') or {}).get('type', 'static') != 'static'   # 不动的层(如称号字)叠在原位,直边看不出来,只提醒
+            if n >= 3 and moving: r['fail'].append(f'部件「{l["name"]}」有 {n} 条硬切直边(最长 {mx}px),像被框裁过')
             elif n: r['warn'].append(f'部件「{l["name"]}」有 {n} 条硬切直边(最长 {mx}px),确认是不是本来就是直的')
             fr = fragments(im)
             if fr: r['warn'].append(f'部件「{l["name"]}」带 {fr} 个游离小碎块(别的部件 / 环的残片?)')
@@ -272,6 +297,20 @@ def measure_section(d):
                     worst = max(worst, int(((As[k] > 0.9) & (mv < 0.5) & enc).sum()))
                 if worst > 100: r['fail'].append(f'部件「{x[0]["name"]}」动到最大处露出底下 {worst} 像素透明洞(2x),底框没补全')
                 elif worst > 20: r['warn'].append(f'部件「{x[0]["name"]}」动到最大处露出 {worst} 像素透明洞(2x)')
+            # 部件要是干净独立的小件(10-30 用户:像 S17 中秋那样,不带底框碎片、边缘不发毛,动起来才不穿帮)
+            bi = [i for i, x in enumerate(lay1) if x[0].get('role') == 'base']
+            if bi:
+                Bc = composite([(lay1[bi[0]][3], tuple(lay1[bi[0]][2]['position']), 'normal')], 2 * W, 2 * H)
+                for x in lay1:
+                    if (x[0].get('motion') or {}).get('type', 'static') == 'static': continue
+                    Pc = composite([(x[3], tuple(x[2]['position']), 'normal')], 2 * W, 2 * H)
+                    sc, rg = frame_scrap(Pc, Bc), ragged(x[3])
+                    r['m'].setdefault('部件底框碎片', {})[x[0]['name']] = round(sc, 4)
+                    r['m'].setdefault('部件毛边', {})[x[0]['name']] = round(rg, 3)
+                    if sc > SCRAP_FAIL: r['fail'].append(f'部件「{x[0]["name"]}」有 {sc:.1%} 是和底框一模一样的像素(带走了底框碎片),动起来会穿帮')
+                    elif sc > SCRAP_WARN: r['warn'].append(f'部件「{x[0]["name"]}」有 {sc:.1%} 和底框同色同位,确认不是底框碎片')
+                    if rg > RAGGED_FAIL: r['fail'].append(f'部件「{x[0]["name"]}」轮廓毛边 / 细刺 {rg:.2f}(干净独立件 ≤{RAGGED_WARN}),像从整图里硬抠')
+                    elif rg > RAGGED_WARN: r['warn'].append(f'部件「{x[0]["name"]}」轮廓毛边 / 细刺 {rg:.2f},确认边缘干净')
 
     # 静态图整体指标
     r['m']['清晰度'] = sharpness(S1)
