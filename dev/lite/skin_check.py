@@ -23,6 +23,7 @@ ICON_SIZES = {'头像框': (256, 256), '名字底': (447, 130), '气泡框': (19
 BOARDS = ('个人信息底板', '窄底板', '中底板', '宽底板')
 LAYOUT_X0, LAYOUT_Y, GAP, NAV_Y = 880, 78, 50, 1017   # 第一张底板看得见的左边缘 / 上沿 / 间距 / 导航 y
 DECO_ROLES = ('ornament', 'deco')
+MOTION_OK = ('static', 'swing', 'float', 'drift')
 
 
 def load(p):
@@ -212,6 +213,11 @@ def measure_section(d):
             if fr: r['warn'].append(f'部件「{l["name"]}」带 {fr} 个游离小碎块(别的部件 / 环的残片?)')
         gs = green_spill(im)
         if gs > 0.05: r['fail'].append(f'「{l["name"]}」半透明边 {gs:.0%} 偏绿(抠绿残留)')
+        # S 级动效:同一个 4 秒循环,只摆动 / 浮动 / 漂移,没有闪烁、缩放呼吸(homeskin skill「动效」)
+        mt = (l.get('motion') or {}).get('type', 'static')
+        if mt not in MOTION_OK: r['fail'].append(f'「{l["name"]}」动效 {mt} 不允许(只用 swing 摆动 / float 浮动 / drift 漂移,没有闪烁、缩放呼吸)')
+        elif mt != 'static' and (l['motion'].get('loop') or l['motion'].get('duration')) != 4:
+            r['fail'].append(f'「{l["name"]}」动效周期 {l["motion"].get("loop") or l["motion"].get("duration")}s,所有物件统一 4 秒循环')
 
     # 头部 / 主体:2x 坐标判断接缝
     hd = [x for x in lay1 if '头部' in x[0]['name']]; bd = [x for x in lay1 if '主体' in x[0]['name']]
@@ -238,6 +244,34 @@ def measure_section(d):
         if msk.sum() > 1000: r['m']['2x细节'] = float(np.abs(L2 - np.asarray(sm, np.float32) / 255)[msk].mean() * 1000)
         if bad > 0.01: r['fail'].append(f'各图层合起来和 A 级静态图有 {bad:.1%} 像素对不上(拆层丢了东西或多了残留)')
         elif bad > 0.002: r['warn'].append(f'各图层合起来和静态图有 {bad:.2%} 像素不同')
+        # 装扮拆层:叠回 = 效果图(10-30「拆完之后拼回去和效果图不能不一样」),逐像素差 >8/255 的不许有
+        ef = os.path.join(d, '2x_效果图.png')
+        if os.path.exists(ef):
+            Ea = np.asarray(Image.open(ef).convert('RGBA')).astype(np.float32) / 255
+            comp = composite([(x[3], tuple(x[2]['position']), x[0].get('blend')) for x in lay1], 2 * W, 2 * H)
+            dif = np.abs(np.dstack([comp[..., :3] * comp[..., 3:], comp[..., 3:]]) - np.dstack([Ea[..., :3] * Ea[..., 3:], Ea[..., 3:]])).max(-1)
+            nb = int((dif > 8 / 255).sum()); r['m']['叠回效果图最大差'] = float(dif.max() * 255)
+            if nb > 20: r['fail'].append(f'各图层叠回和 2x 效果图有 {nb} 像素差 >8/255(最大 {dif.max() * 255:.0f}/255),拆完拼不回效果图')
+            elif nb: r['warn'].append(f'各图层叠回和 2x 效果图有 {nb} 像素差 >8/255')
+            # 动起来露洞(10-30「不能出现崩坏」):部件摆 / 浮到最大处,原来被它盖住的地方如果是底框围住的透明洞就露馅
+            As = [composite([(x[3], tuple(x[2]['position']), x[0].get('blend'))], 2 * W, 2 * H)[..., 3] for x in lay1]
+            for k, x in enumerate(lay1):
+                mo = x[0].get('motion') or {}
+                if mo.get('type', 'static') == 'static': continue
+                O = np.maximum.reduce([a for i, a in enumerate(As) if i != k]) > 0.5
+                enc = ndimage.binary_fill_holes(ndimage.binary_closing(O, iterations=6)) & ~O
+                lab, n = ndimage.label(enc); sz = ndimage.sum(enc, lab, range(1, n + 1))
+                enc = np.isin(lab, 1 + np.where(sz < enc.size * 0.01)[0])   # 大洞本来就空(头像框中间的头像位)
+                worst = 0
+                for s in (1, -0.15):   # 最大处和前摇
+                    if mo['type'] == 'swing' and mo.get('pivot'):
+                        mv = np.asarray(Image.fromarray(As[k]).rotate(mo.get('angle', 0) * s, resample=Image.BILINEAR, center=tuple(v * 2 for v in mo['pivot'])))
+                    elif mo.get('offset'):
+                        dx, dy = [int(round(v * 2 * s)) for v in mo['offset']]; mv = np.roll(np.roll(As[k], dy, 0), dx, 1)
+                    else: continue
+                    worst = max(worst, int(((As[k] > 0.9) & (mv < 0.5) & enc).sum()))
+                if worst > 100: r['fail'].append(f'部件「{x[0]["name"]}」动到最大处露出底下 {worst} 像素透明洞(2x),底框没补全')
+                elif worst > 20: r['warn'].append(f'部件「{x[0]["name"]}」动到最大处露出 {worst} 像素透明洞(2x)')
 
     # 静态图整体指标
     r['m']['清晰度'] = sharpness(S1)
@@ -336,7 +370,7 @@ def main():
             v, q = m.get(k), (ref or {'m': {}})['m'].get(k)
             if v is None: return None
             return f'{k} {v:.2f}' + (f'(完成稿 {q:.2f})' if isinstance(q, float) else '') if isinstance(v, float) else f'{k} {v}'
-        nums = ' · '.join(x for x in map(f, ('板子尺寸', '清晰度', '2x细节', '边缘过渡', '投影量', '投影伸出', '合成差异', '头身接缝')) if x)
+        nums = ' · '.join(x for x in map(f, ('板子尺寸', '清晰度', '2x细节', '边缘过渡', '投影量', '投影伸出', '合成差异', '叠回效果图最大差', '头身接缝')) if x)
         out.append(f'\n## {r["name"]} — {tag}\n{nums}')
         out += ['- ✗ ' + x for x in r['fail']] + ['- △ ' + x for x in r['warn']]
     txt = '\n'.join(out)
