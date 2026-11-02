@@ -73,23 +73,60 @@ def stretch_mid(im, w, h, a=0.42, b=0.58):
     return out
 
 
-BADGE = (0.852, 0.114, 0.929, 0.254)   # 黑胶霓虹底图右上角 AI 自带的「Discount」小标签(相对按钮体,放大量过),折扣角标用组件的
+BADGE = (0.731, 0.119, 0.870, 0.255)   # 黑胶霓虹底图右上角 AI 自带的「Discount」小标签(相对未拉伸的原图按钮体,放大量过),折扣角标用组件的
 
 
 def erase_badge(body):
-    """擦掉 AI 画进底图的小标签:只动标签那一小块。标签底下本来是直的内框线 + 高光带上沿,所以把标签紧左边那一列
-    原样往右延伸(线的高度和左边严格对齐,中段的线因为 AI 画得略斜会对不上,11-02 用户指出过双线);
-    再做无缝融合:补丁四条边和原图的色差按调和插值平滑摊进补丁里(泊松融合),右边接转弯框线、下边接渐变都不留台阶。
-    高光圆角、描边不动。"""
+    """擦掉 AI 画进底图的小标签并补全被挡的部分(在拉伸前的原分辨率按钮体上做)。
+    按钮是圆角胶囊,框线 / 内沿 / 高光带都和外轮廓平行:先用右上外轮廓拟合圆角(圆心、半径),
+    标签里每个像素按「到外轮廓的距离」去标签左边那一列的同一距离取色 —— 直段就是平移,转弯段自动跟着圆弧弯下去;
+    再把补丁边上和原图的色差按调和插值摊进去(泊松融合),横向渐变、AI 画歪的一两个像素都接得上。
+    11-02 前几版只往右平移 / 只融合,转弯处出双线、方块痕,用户否过。"""
     w, h = body.size
     x0, y0, x1, y1 = (round(v * s) for v, s in zip(BADGE, (w, h, w, h)))
     a = np.asarray(body).astype(np.float64)
-    base = np.repeat(a[y0 - 1:y1 + 1, x0 - 2:x0 - 1], x1 - x0 + 2, axis=1)   # 含一圈边界
-    d = a[y0 - 1:y1 + 1, x0 - 1:x1 + 1] - base       # 只有边界上的差有意义
-    d[1:-1, 1:-1] = 0
-    for _ in range(3000):
+    al = a[..., 3] > 128
+    top = int(np.argmax(al[:, x0 - 6]))                            # 外轮廓上沿(直段)
+    ys = np.arange(top + 4, h // 2)
+    xs = np.array([np.where(al[y])[0].max() for y in ys], np.float64)
+    # 圆角:圆心 (cx, top + R),最小二乘拟合 (x - cx)^2 + (y - top - R)^2 = R^2
+    A = np.c_[2 * xs, 2 * (ys - top), np.ones_like(xs)]
+    sol = np.linalg.lstsq(A, xs ** 2 + (ys - top) ** 2, rcond=None)[0]
+    ref = a[:, x0 - 4]                                             # 标签左边的参考列,到外轮廓距离 = y - top
+
+    from scipy.ndimage import map_coordinates
+    D = np.arange(0, y1 - top + 40, dtype=np.float64)
+
+    def remap(cx, R, ys_, xs_):
+        """直段截面(参考列)和弧段截面(标签右下角外侧那条半径上取)按角度过渡 —— AI 画的弧段内沿光带比直段宽。"""
+        cy = top + R
+        ta = np.arctan2(x1 + 6 - cx, cy - (y1 + 6))                 # 弧段截面所在角度,在标签外
+        py, px = cy - (R - D) * np.cos(ta), cx + (R - D) * np.sin(ta)
+        arc = np.stack([map_coordinates(a[..., c], [py, px], order=1, mode="nearest") for c in range(4)], 1)
+        line = ref[np.clip(top + D.astype(int), 0, h - 1)]
+        inside = xs_ > cx
+        dist = np.where(inside, R - np.hypot(xs_ - cx, ys_ - cy), ys_ - top)
+        t = np.where(inside, np.clip(np.arctan2(xs_ - cx, cy - ys_) / max(ta, 1e-3), 0, 1), 0)[..., None]
+        dd = np.clip(dist, 0, len(D) - 1); lo = np.floor(dd).astype(int); hi = np.minimum(lo + 1, len(D) - 1); f = (dd - lo)[..., None]
+        pick = lambda p: p[lo] * (1 - f) + p[hi] * f
+        return pick(line) * (1 - t) + pick(arc) * t
+
+    # 里面的框线和外轮廓不一定严格同心(AI 画的):在标签右边没被挡的一条带上试圆心 / 半径,取重建误差最小的
+    vy, vx = np.mgrid[y0 - 10:y1 + 30, x1:x1 + 50].astype(np.float64)
+    vy, vx = vy[al[y0 - 10:y1 + 30, x1:x1 + 50]], vx[al[y0 - 10:y1 + 30, x1:x1 + 50]]
+    truth = a[vy.astype(int), vx.astype(int)]
+    best = min(((np.abs(remap(cx, R, vy, vx)[:, :3] - truth[:, :3]).mean(), cx, R)
+                for cx in np.arange(sol[0] - 60, sol[0] + 61, 4) for R in np.arange(sol[1] - 80, sol[1] + 81, 4)))
+    _, cx, R = best
+    m = np.zeros((h, w), bool); m[y0:y1, x0:x1] = True
+    yy, xx = np.nonzero(m)
+    rec = a.copy(); rec[m] = remap(cx, R, yy.astype(np.float64), xx.astype(np.float64))
+    # 泊松融合:差值在边界上 = 原图 - 重建,内部调和
+    sy, sx = slice(y0 - 1, y1 + 1), slice(x0 - 1, x1 + 1)
+    d = a[sy, sx] - rec[sy, sx]; d[1:-1, 1:-1] = 0
+    for _ in range(4000):
         d[1:-1, 1:-1] = 0.25 * (d[:-2, 1:-1] + d[2:, 1:-1] + d[1:-1, :-2] + d[1:-1, 2:])
-    a[y0:y1, x0:x1] = (base + d)[1:-1, 1:-1]
+    a[y0:y1, x0:x1] = (rec[sy, sx] + d)[1:-1, 1:-1]
     return Image.fromarray(np.clip(a, 0, 255).astype(np.uint8), "RGBA")
 
 
@@ -99,7 +136,7 @@ def load(spec, figma, size):
         return recolor(os.path.join(figma, name), HUE[name]).resize(size, Image.LANCZOS)
     if spec.startswith("pair:"):                   # pair:图:0/1 = 一张图里左右一对按钮,取左 / 右
         path, idx = spec[5:].rsplit(":", 1)
-        body = stretch_mid(keep_main(split_pair(key_green(Image.open(path)))[int(idx)]), *PLATE)
+        body = stretch_mid(erase_badge(keep_main(split_pair(key_green(Image.open(path)))[int(idx)])), *PLATE)
         out = Image.new("RGBA", size)               # 画布仍是组件 531×171,看得见的按钮体 434×110 摆在旧按钮体中心
         out.alpha_composite(body, (PLATE_C[0] - PLATE[0] // 2, PLATE_C[1] - PLATE[1] // 2))
         return out
