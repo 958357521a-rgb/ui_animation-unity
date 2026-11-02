@@ -2,7 +2,7 @@
 用法: python parts.py <方案字母> <选定的整卡.png> <无角标卡片框.png> <弹窗卡片.png> <输出目录>
 - 整卡 = card_jobs 出的卡片(绿底,带角标);角标从这里按 S18 角标外形抠出来
 - 无角标卡片框 / 弹窗卡片 = AI 在整卡上去掉角标 / 去掉价格按钮的版本(绿底)
-- 已售罄卡片框:价格按钮换灰;置灰遮罩:卡片框外形的深灰剪影(开运算去掉外沿小凸起)
+- 已售罄卡片框:价格按钮换灰;置灰遮罩:卡片本体完整剪影,和卡片框同画布(345×444),在母件里和卡片框同位置
 - 信息行底 / 解锁条底:只切底,不带图标(11-02 用户:图标和底分开)。计时图标、锁、两侧细线、印章、物品图标、货币条是通用件,
   在 Figma 里直接用 S18 组件实例 / 原图层,不重切。信息行底在 Figma 里是渐变矩形,这里另存一张 PNG 备用。
 可选第 6 个参数 = 背景图:另存 背景.png(2436×1125)和 立绘.png(带柔光,裁到内容,文件名里不带坐标,坐标打印出来)
@@ -11,31 +11,48 @@ import sys, os
 from PIL import Image, ImageOps, ImageFilter
 from compose import key_green, bbox_crop, recolor, place_char, SCHEME, S18, W, H, CHAR_H, CHAR_CX, CHAR_FOOT
 
-SIZES = {"卡片框": (345, 444), "折扣角标": (124, 77), "置灰遮罩": (341, 440), "已售罄卡片框": (345, 444), "弹窗卡片": (329, 424),
+SIZES = {"卡片框": (345, 444), "折扣角标": (124, 77), "置灰遮罩": (345, 444), "已售罄卡片框": (345, 444), "弹窗卡片": (329, 424),
          "信息行底": (280, 28), "解锁条底": (337, 59)}
 
 
-def clean_edge(im):
-    """绿底抠图后的边缘清理(11-02 用户:投影边缘不自然):
-    去掉 AI 在绿底上画的投影(抠完是半透明暗青色)和贴边的绿色溢色,外轮廓重新抗锯齿,再补一层干净的合成投影。画布尺寸不变。"""
-    im = im.copy(); px = im.load(); W, H = im.size
-    solid = im.getchannel("A").point(lambda v: 255 if v > 128 else 0)
-    near = solid.point(lambda v: 255 - v).filter(ImageFilter.MaxFilter(max(5, W // 25) | 1)).load()  # 贴近外轮廓的一圈
+def crisp_cut(path):
+    """绿底 AI 图 → 边缘干净的卡片本体(11-02 用户:边缘模糊不干净,要像 S18 那样边缘清晰、投影另算)。
+    在原图分辨率上硬抠:绿色占比稍高就全透明(霓虹光晕和 AI 画在绿底上的投影一起去掉),去绿溢色,
+    贴边残留的暗青色也去掉,小开运算去毛刺;RGB 轻度锐化。抗锯齿交给之后缩到 2x / 1x 的 LANCZOS。"""
+    im = Image.open(path).convert("RGBA"); px = im.load(); W, H = im.size
     for y in range(H):
         for x in range(W):
             r, g, b, a = px[x, y]
-            if not a: continue
-            if g > max(r, b): g = max(r, b)  # 去绿溢色(卡片框里没有绿色)
-            if near[x, y] and min(g, b) - r >= 10 and max(r, g, b) < 175: a = 0  # 暗青色 = 抠剩的投影
+            d = g - max(r, b)
+            if d > 24: px[x, y] = (0, 0, 0, 0); continue
+            if d > 0: g = max(r, b)
             px[x, y] = (r, g, b, a)
-    k = max(3, W // 120) | 1
-    al = im.getchannel("A").point(lambda v: 255 if v > 128 else 0).filter(ImageFilter.MinFilter(k)).filter(ImageFilter.MaxFilter(k))
-    al = al.filter(ImageFilter.GaussianBlur(max(0.6, W / 700)))
-    im.putalpha(al)
-    sh = Image.new("RGBA", (W, H), (46, 14, 40, 0))
-    sh.putalpha(al.point(lambda v: v * 90 // 255).filter(ImageFilter.GaussianBlur(W / 90)))
-    out = Image.new("RGBA", (W, H)); out.alpha_composite(sh, (0, max(2, W // 115))); out.alpha_composite(im)
-    return out
+    solid = im.getchannel("A").point(lambda v: 255 if v > 128 else 0)
+    near = solid.point(lambda v: 255 - v).filter(ImageFilter.MaxFilter(9)).load()
+    for y in range(H):
+        for x in range(W):
+            r, g, b, a = px[x, y]
+            if a and near[x, y] and min(g, b) - r >= 8 and max(r, g, b) < 190: px[x, y] = (0, 0, 0, 0)
+    al = im.getchannel("A").point(lambda v: 255 if v > 128 else 0).filter(ImageFilter.MinFilter(3)).filter(ImageFilter.MaxFilter(3))
+    rgb = im.convert("RGB").filter(ImageFilter.UnsharpMask(2, 90, 2))
+    out = rgb.convert("RGBA"); out.putalpha(al)
+    return out.crop(al.getbbox())
+
+
+def with_shadow(body, size):
+    """本体放进组件画布(下方留投影位),在本体下面垫一层合成投影:本体边缘保持清晰,投影只在下沿露出来。"""
+    w, h = size; W = body.width
+    s = W / (w - 4)  # 左右各留 2px(1x)
+    cw, ch = round(w * s), round(h * s)
+    bh = ch - round(10 * s)  # 下方留 10px(1x)给投影
+    b = body.resize((cw - round(4 * s), bh), Image.LANCZOS)
+    canvas = Image.new("RGBA", (cw, ch)); x0 = round(2 * s)
+    al = b.getchannel("A")
+    sh = Image.new("RGBA", b.size, (60, 16, 52, 0)); sh.putalpha(al.point(lambda v: v * 110 // 255))
+    pad = Image.new("RGBA", (cw, ch)); pad.alpha_composite(sh, (x0, round(5 * s)))
+    pad = pad.filter(ImageFilter.GaussianBlur(3 * s))
+    canvas.alpha_composite(pad); canvas.alpha_composite(b, (x0, 0))
+    return canvas, (x0, 0, b.width, b.height)
 
 
 def grey_button(frame):
@@ -55,22 +72,23 @@ def grey_button(frame):
     return out
 
 
-def mask_of(frame):
-    a = frame.getchannel("A").point(lambda v: 255 if v > 128 else 0)
-    k = max(3, frame.width // 40) | 1  # 开运算:去掉外沿小凸起(挂坠等),外形跟卡片主体一致
-    a = a.filter(ImageFilter.MinFilter(k)).filter(ImageFilter.MaxFilter(k))
-    m = Image.new("RGBA", frame.size, (34, 30, 38, 0)); m.putalpha(a.point(lambda v: v * 150 // 255))
+def mask_of(canvas, box):
+    """置灰遮罩 = 卡片本体的完整剪影(连同耳机等外沿装饰),和卡片框同画布同位置,叠上去严丝合缝。"""
+    x0, y0, w, h = box
+    a = canvas.getchannel("A").crop((x0, y0, x0 + w, y0 + h))
+    m = Image.new("RGBA", canvas.size, (30, 26, 36, 0))
+    al = Image.new("L", canvas.size); al.paste(a.point(lambda v: v * 140 // 255), (x0, y0)); m.putalpha(al)
     return m
 
 
 def main(scheme, card, frame, popup, out, bg=None):
     sc = SCHEME[scheme]; os.makedirs(out, exist_ok=True)
     hi = {}  # 2x 源
-    fr = clean_edge(bbox_crop(key_green(Image.open(frame))))
-    hi["卡片框"] = fr
-    hi["已售罄卡片框"] = grey_button(fr)
-    hi["置灰遮罩"] = mask_of(fr)
-    hi["弹窗卡片"] = clean_edge(bbox_crop(key_green(Image.open(popup))))
+    body = crisp_cut(frame)
+    hi["卡片框"], box = with_shadow(body, SIZES["卡片框"])
+    hi["已售罄卡片框"], _ = with_shadow(grey_button(body), SIZES["已售罄卡片框"])
+    hi["置灰遮罩"] = mask_of(hi["卡片框"], box)
+    hi["弹窗卡片"], _ = with_shadow(crisp_cut(popup), SIZES["弹窗卡片"])
     # 角标:整卡实例(353×452 内容范围,角标在 (0,0) 124×77)按 S18 角标 alpha 抠
     inst = bbox_crop(key_green(Image.open(card)))
     s = inst.width / 353
