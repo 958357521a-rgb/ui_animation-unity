@@ -77,17 +77,19 @@ BADGE = (0.852, 0.114, 0.929, 0.254)   # 黑胶霓虹底图右上角 AI 自带�
 
 
 def erase_badge(body):
-    """擦掉 AI 画进底图的小标签:只动标签那一小块。标签底下本来是直的内框线 + 高光带上沿,所以用按钮中段
-    (拉伸出来的、横向一致)的一列当竖向轮廓,再加上从标签左右两侧量到的差值做横向过渡;高光圆角、描边不动。"""
+    """擦掉 AI 画进底图的小标签:只动标签那一小块。标签底下本来是直的内框线 + 高光带上沿,所以把标签紧左边那一列
+    原样往右延伸(线的高度和左边严格对齐,中段的线因为 AI 画得略斜会对不上,11-02 用户指出过双线);
+    再做无缝融合:补丁四条边和原图的色差按调和插值平滑摊进补丁里(泊松融合),右边接转弯框线、下边接渐变都不留台阶。
+    高光圆角、描边不动。"""
     w, h = body.size
     x0, y0, x1, y1 = (round(v * s) for v, s in zip(BADGE, (w, h, w, h)))
     a = np.asarray(body).astype(np.float64)
-    k = max(1, round(w * 0.004))                     # 取几列平均,避免单个噪点
-    col = lambda x: a[y0:y1, x:x + k].mean(axis=1, keepdims=True)
-    P = col(round(w * 0.6))                          # 中段竖向轮廓
-    L, R = col(x0 - k) - P, col(x1) - P              # 两侧和中段的差(横向渐变)
-    t = np.linspace(0, 1, x1 - x0)[None, :, None]
-    a[y0:y1, x0:x1] = P + L * (1 - t) + R * t
+    base = np.repeat(a[y0 - 1:y1 + 1, x0 - 2:x0 - 1], x1 - x0 + 2, axis=1)   # 含一圈边界
+    d = a[y0 - 1:y1 + 1, x0 - 1:x1 + 1] - base       # 只有边界上的差有意义
+    d[1:-1, 1:-1] = 0
+    for _ in range(3000):
+        d[1:-1, 1:-1] = 0.25 * (d[:-2, 1:-1] + d[2:, 1:-1] + d[1:-1, :-2] + d[1:-1, 2:])
+    a[y0:y1, x0:x1] = (base + d)[1:-1, 1:-1]
     return Image.fromarray(np.clip(a, 0, 255).astype(np.uint8), "RGBA")
 
 
