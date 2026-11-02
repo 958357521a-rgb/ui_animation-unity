@@ -19,32 +19,22 @@ def crisp_cut(path):
     """绿底 AI 图 → 边缘干净的卡片本体(11-02 用户:边缘模糊不干净,要像 S18 那样边缘清晰、投影另算)。
     在原图分辨率上硬抠:绿色占比稍高就全透明(霓虹光晕和 AI 画在绿底上的投影一起去掉),去绿溢色,
     贴边残留的暗青色也去掉,小开运算去毛刺;RGB 轻度锐化。抗锯齿交给之后缩到 2x / 1x 的 LANCZOS。"""
-    im = Image.open(path).convert("RGBA"); px = im.load(); W, H = im.size
-    for y in range(H):
-        for x in range(W):
-            r, g, b, a = px[x, y]
-            d = g - max(r, b)
-            if d > 24: px[x, y] = (0, 0, 0, 0); continue
-            if d > 0: g = max(r, b)
-            px[x, y] = (r, g, b, a)
-    solid = im.getchannel("A").point(lambda v: 255 if v > 128 else 0)
-    near = solid.point(lambda v: 255 - v).filter(ImageFilter.MaxFilter(9)).load()
-    for y in range(H):
-        for x in range(W):
-            r, g, b, a = px[x, y]
-            if a and near[x, y] and min(g, b) - r >= 8 and max(r, g, b) < 190: px[x, y] = (0, 0, 0, 0)
-    # 轮廓在 4 倍上取:放大 + 轻微平滑后阈值(轮廓是光滑曲线,不是像素台阶),开运算去毛刺,再盒式缩回 = 1px 抗锯齿边,不发糊
-    # (11-02 用户:直接在原分辨率阈值锯齿太明显)
-    k = 4
-    al = im.getchannel("A").resize((W * k, H * k), Image.BICUBIC).filter(ImageFilter.GaussianBlur(k * 0.6))
-    al = al.point(lambda v: 255 if v > 128 else 0).filter(ImageFilter.MinFilter(2 * k - 1)).filter(ImageFilter.MaxFilter(2 * k - 1))
-    al = al.resize((W, H), Image.BOX)
-    rgb = im.convert("RGB").filter(ImageFilter.UnsharpMask(2, 90, 2))
-    m = im.getchannel("A").point(lambda v: 255 if v > 128 else 0)
-    for _ in range(3):  # 抠掉的像素是黑色,抗锯齿边会混出黑边:把本体颜色往外延 3px 垫底
-        rgb = Image.composite(rgb, rgb.filter(ImageFilter.MaxFilter(3)), m); m = m.filter(ImageFilter.MaxFilter(3))
-    out = rgb.convert("RGBA"); out.putalpha(al)
-    return out.crop(al.getbbox())
+    # 11-02 用户:扭蛋切图质量合格 → 照 dev/gacha_bg/ui_compose.key_green:按绿色占比线性出 alpha(原图自带的抗锯齿和光晕
+    # 半透明都保留,不阈值、不模糊、不锐化),去绿边;只多一步:贴边的暗青色(AI 画在绿底上的投影)按青色程度渐变去掉
+    import numpy as np
+    a = np.asarray(Image.open(path).convert("RGB")).astype(np.float32)
+    r, g, b = a[..., 0], a[..., 1], a[..., 2]
+    alpha = 1 - np.clip((g - np.maximum(r, b) - 25) / 110, 0, 1)
+    # 半透明边上的颜色 = 本体色和绿底的混合:按 alpha 把绿底减回去(不减会留一圈黄绿边),再去绿溢色
+    bgc = np.median(np.concatenate([a[:8].reshape(-1, 3), a[-8:].reshape(-1, 3)]), axis=0)
+    k = np.maximum(alpha, 0.05)[..., None]
+    r, g, b = np.moveaxis(np.clip((a - (1 - k) * bgc) / k, 0, 255), -1, 0)
+    g = np.minimum(g, np.maximum(r, b) + 4)
+    edge = np.asarray(Image.fromarray(((alpha < 0.5) * 255).astype(np.uint8)).filter(ImageFilter.MaxFilter(9))) > 0
+    cyan = np.clip((np.minimum(g, b) - r - 4) / 20, 0, 1) * np.clip((190 - np.maximum(np.maximum(r, g), b)) / 60, 0, 1)
+    alpha = np.where(edge, alpha * (1 - cyan), alpha)
+    out = Image.fromarray(np.dstack([r, g, b, alpha * 255]).clip(0, 255).astype(np.uint8), "RGBA")
+    return out.crop(out.getchannel("A").point(lambda v: 255 if v > 24 else 0).getbbox())
 
 
 def with_shadow(body, size):
