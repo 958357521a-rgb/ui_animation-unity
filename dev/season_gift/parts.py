@@ -81,6 +81,19 @@ def mask_of(canvas, box):
     return m
 
 
+def clean_tag(path, out):
+    """11-02 用户:从整卡抠的角标糊 → 照卡片底的做法让 AI 单独重画清晰角标(参考 = 现有角标放大到绿底,提示词写死横向椭圆,
+    见 exports/nano/<期>/tag_jobs.py),这里抠出来按 S18 角标外形的范围放进 124×77 画布,出 1x + @2x。"""
+    body = crisp_cut(path)
+    shape = Image.open(os.path.join(S18, "角标_raw.png")).convert("RGBA").getchannel("A")
+    for k in (1, 2):
+        w, h = SIZES["折扣角标"][0] * k, SIZES["折扣角标"][1] * k
+        x0, y0, x1, y1 = shape.resize((w, h), Image.LANCZOS).point(lambda v: 255 if v > 24 else 0).getbbox()
+        canvas = Image.new("RGBA", (w, h)); canvas.alpha_composite(body.resize((x1 - x0, y1 - y0), Image.LANCZOS), (x0, y0))
+        canvas.save(os.path.join(out, "折扣角标" + ("@2x" if k == 2 else "") + ".png"))
+    print("角标范围", (x0, y0, x1, y1))
+
+
 def main(scheme, card, frame, popup, out, bg=None):
     sc = SCHEME[scheme]; os.makedirs(out, exist_ok=True)
     hi = {}  # 2x 源
@@ -122,4 +135,7 @@ def main(scheme, card, frame, popup, out, bg=None):
 
 
 if __name__ == "__main__":
-    main(*sys.argv[1:7])
+    if sys.argv[1] == "tag":  # python parts.py tag <AI 重画的角标.png> <输出目录>
+        clean_tag(*sys.argv[2:4])
+    else:
+        main(*sys.argv[1:7])
