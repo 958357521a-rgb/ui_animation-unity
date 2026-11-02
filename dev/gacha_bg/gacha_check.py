@@ -80,7 +80,7 @@ def overlay(im, out_path):
     d.line([(0, s["horizon_y"]), (W, s["horizon_y"])], fill=(255, 255, 255, 160), width=2)
     ex, ey, ew, eh = s["stage_ellipse"]
     d.ellipse((ex, ey, ex + ew, ey + eh), outline=(255, 255, 255, 160), width=3)
-    for k in ("frame_left", "frame_right", "character_slot"):
+    for k in ("backdrop", "character_slot"):
         d.rectangle(box(s[k]), outline=(255, 120, 255, 220), width=4)
     Image.alpha_composite(ov, layer).convert("RGB").save(out_path)
 
@@ -119,13 +119,13 @@ def main():
     lines += ["", "| 配色 | 本图 | 模板 | 目标 |", "|---|---|---|---|",
               f"| 亮部(V>200) | {p['light']:.0%} | {rp['light']:.0%} | ≥{T['light_min']:.0%} |",
               f"| 中间调 | {p['mid']:.0%} | {rp['mid']:.0%} | — |",
-              f"| 暗部(V<100) | {p['dark']:.0%} | {rp['dark']:.0%} | ≤{T['dark_max']:.0%}(只做框景道具里的小块压重) |",
+              f"| 暗部(V<100) | {p['dark']:.0%} | {rp['dark']:.0%} | ≤{T['dark_max']:.0%}(只做背板边框和道具里的小块压重) |",
               f"| 饱和色总量 | {p['sat']:.0%} | {rp['sat']:.0%} | ≤{T['sat_max']:.0%} |",
               f"| 主色相 ±30° | {p['main']:.0%}(色相 {p['main_hue']}°) | {rp['main']:.0%}(色相 {rp['main_hue']}°) | 占饱和色 ≥{T['main_hue_share_of_sat_min']:.0%} |",
               f"| 对比色 | {p['accent']:.0%} | {rp['accent']:.0%} | {T['accent_min']:.0%}–{T['accent_max']:.0%} |"]
     checks = [
         (p["light"] < T["light_min"], "✗", "亮部不够:整体要像模板一样是高调浅色,UI 和模型才读得清"),
-        (p["dark"] > T["dark_max"], "✗", "暗部太多:深色只留给框景道具里的小块结构"),
+        (p["dark"] > T["dark_max"], "✗", "暗部太多:深色只留给背板边框和道具里的小块结构"),
         (p["sat"] > T["sat_max"], "✗", "饱和色太多:画面会被一个颜色淹没(初版的问题),主色只上在道具、灯带、舞台边"),
         (main_of_sat < T["main_hue_share_of_sat_min"], "!", "饱和色不集中在主色相,看起来杂"),
         (p["accent"] < T["accent_min"], "!", "几乎只有一个色相:按风格卡加少量对比色(灯光、点缀)"),

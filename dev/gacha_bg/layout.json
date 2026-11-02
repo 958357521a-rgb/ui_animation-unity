@@ -34,12 +34,11 @@
     "busy_ratio_warn": 1.4
   },
   "structure": {
-    "note": "以下按圣羽降临干净背景目测(±20px),zones 是 Figma 实数",
+    "note": "只是遮罩预览里画的参考线(±50px),不是道具位置;道具放什么放哪里每期自由,规则见规范 §3。zones 是 Figma 实数",
     "model_center_x": 1284,
     "horizon_y": 570,
     "stage_ellipse": [290, 730, 1900, 370],
-    "frame_left": [470, 120, 540, 680],
-    "frame_right": [1760, 120, 676, 800],
+    "backdrop": [800, 140, 968, 640],
     "character_slot": [1960, 260, 420, 480]
   }
 }
