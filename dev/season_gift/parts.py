@@ -33,8 +33,16 @@ def crisp_cut(path):
         for x in range(W):
             r, g, b, a = px[x, y]
             if a and near[x, y] and min(g, b) - r >= 8 and max(r, g, b) < 190: px[x, y] = (0, 0, 0, 0)
-    al = im.getchannel("A").point(lambda v: 255 if v > 128 else 0).filter(ImageFilter.MinFilter(3)).filter(ImageFilter.MaxFilter(3))
+    # 轮廓在 4 倍上取:放大 + 轻微平滑后阈值(轮廓是光滑曲线,不是像素台阶),开运算去毛刺,再盒式缩回 = 1px 抗锯齿边,不发糊
+    # (11-02 用户:直接在原分辨率阈值锯齿太明显)
+    k = 4
+    al = im.getchannel("A").resize((W * k, H * k), Image.BICUBIC).filter(ImageFilter.GaussianBlur(k * 0.6))
+    al = al.point(lambda v: 255 if v > 128 else 0).filter(ImageFilter.MinFilter(2 * k - 1)).filter(ImageFilter.MaxFilter(2 * k - 1))
+    al = al.resize((W, H), Image.BOX)
     rgb = im.convert("RGB").filter(ImageFilter.UnsharpMask(2, 90, 2))
+    m = im.getchannel("A").point(lambda v: 255 if v > 128 else 0)
+    for _ in range(3):  # 抠掉的像素是黑色,抗锯齿边会混出黑边:把本体颜色往外延 3px 垫底
+        rgb = Image.composite(rgb, rgb.filter(ImageFilter.MaxFilter(3)), m); m = m.filter(ImageFilter.MaxFilter(3))
     out = rgb.convert("RGBA"); out.putalpha(al)
     return out.crop(al.getbbox())
 
