@@ -8,12 +8,12 @@ import argparse, os, sys
 from PIL import Image
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ui_compose import ZONES, key_green, drop_ghosts, logo_box, fit, glow
-from ui3_compose import BTN, PLATE, PLATE_C, keep_main, split_pair, stretch_mid
+from ui3_compose import BTN, PLATE, PLATE_C, keep_main, split_pair, stretch_mid, erase_badge
 
 
 def plate2x(spec):
     path, idx = spec[5:].rsplit(":", 1)
-    body = stretch_mid(keep_main(split_pair(key_green(Image.open(path)))[int(idx)]), PLATE[0] * 2, PLATE[1] * 2)
+    body = erase_badge(stretch_mid(keep_main(split_pair(key_green(Image.open(path)))[int(idx)]), PLATE[0] * 2, PLATE[1] * 2))
     out = Image.new("RGBA", (BTN[0] * 2, BTN[1] * 2))
     out.alpha_composite(body, (PLATE_C[0] * 2 - body.width // 2, PLATE_C[1] * 2 - body.height // 2))
     return out

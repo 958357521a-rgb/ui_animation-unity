@@ -73,13 +73,25 @@ def stretch_mid(im, w, h, a=0.42, b=0.58):
     return out
 
 
+BADGE = (0.845, 0.10, 0.935, 0.27)   # 黑胶霓虹底图右上角 AI 自带的「Discount」小标签(相对按钮体),折扣角标用组件的
+
+
+def erase_badge(body):
+    """用标签左边同一高度的玻璃面盖掉 AI 画进底图的小标签(玻璃面横向基本均匀)。"""
+    w, h = body.size
+    x0, y0, x1, y1 = (round(v * s) for v, s in zip(BADGE, (w, h, w, h)))
+    dx = x1 - x0 + round(w * 0.02)
+    body = body.copy(); body.paste(body.crop((x0 - dx, y0, x1 - dx, y1)), (x0, y0))
+    return body
+
+
 def load(spec, figma, size):
     if spec.startswith("recolor:"):
         name = spec.split(":", 1)[1]
         return recolor(os.path.join(figma, name), HUE[name]).resize(size, Image.LANCZOS)
     if spec.startswith("pair:"):                   # pair:图:0/1 = 一张图里左右一对按钮,取左 / 右
         path, idx = spec[5:].rsplit(":", 1)
-        body = stretch_mid(keep_main(split_pair(key_green(Image.open(path)))[int(idx)]), *PLATE)
+        body = erase_badge(stretch_mid(keep_main(split_pair(key_green(Image.open(path)))[int(idx)]), *PLATE))
         out = Image.new("RGBA", size)               # 画布仍是组件 531×171,看得见的按钮体 434×110 摆在旧按钮体中心
         out.alpha_composite(body, (PLATE_C[0] - PLATE[0] // 2, PLATE_C[1] - PLATE[1] // 2))
         return out
