@@ -99,7 +99,7 @@ def load(spec, figma, size):
         return recolor(os.path.join(figma, name), HUE[name]).resize(size, Image.LANCZOS)
     if spec.startswith("pair:"):                   # pair:图:0/1 = 一张图里左右一对按钮,取左 / 右
         path, idx = spec[5:].rsplit(":", 1)
-        body = erase_badge(stretch_mid(keep_main(split_pair(key_green(Image.open(path)))[int(idx)]), *PLATE))
+        body = stretch_mid(keep_main(split_pair(key_green(Image.open(path)))[int(idx)]), *PLATE)
         out = Image.new("RGBA", size)               # 画布仍是组件 531×171,看得见的按钮体 434×110 摆在旧按钮体中心
         out.alpha_composite(body, (PLATE_C[0] - PLATE[0] // 2, PLATE_C[1] - PLATE[1] // 2))
         return out

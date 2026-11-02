@@ -1,4 +1,4 @@
-"""扭蛋 UI 件导出 2x 切图给 Figma 用(放进模板画板里替换图层):
+﻿"""扭蛋 UI 件导出 2x 切图给 Figma 用(放进模板画板里替换图层):
 按钮只出底板(不带字,字 / 币 / 角标用 Figma 组件里的),画布 1062×342,按钮体 868×220 放在 ui3_compose.PLATE_C 位置;
 奖励底 458×464;logo 2x 并打印它在 2436×1125 画面里的 1x 位置。
 
@@ -8,12 +8,12 @@ import argparse, os, sys
 from PIL import Image
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ui_compose import ZONES, key_green, drop_ghosts, logo_box, fit, glow
-from ui3_compose import BTN, PLATE, PLATE_C, keep_main, split_pair, stretch_mid, erase_badge
+from ui3_compose import BTN, PLATE, PLATE_C, keep_main, split_pair, stretch_mid
 
 
 def plate2x(spec):
     path, idx = spec[5:].rsplit(":", 1)
-    body = erase_badge(stretch_mid(keep_main(split_pair(key_green(Image.open(path)))[int(idx)]), PLATE[0] * 2, PLATE[1] * 2))
+    body = stretch_mid(keep_main(split_pair(key_green(Image.open(path)))[int(idx)]), PLATE[0] * 2, PLATE[1] * 2)
     out = Image.new("RGBA", (BTN[0] * 2, BTN[1] * 2))
     out.alpha_composite(body, (PLATE_C[0] * 2 - body.width // 2, PLATE_C[1] * 2 - body.height // 2))
     return out
