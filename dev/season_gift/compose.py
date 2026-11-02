@@ -10,8 +10,8 @@ from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageOps
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "../.."))
 W, H = 2436, 1125
-TAB_NAME = "甜心歌姬礼包"
-CARD_TITLE = "甜心歌姬礼 Ⅵ"
+TAB_NAME = "甜心音浪礼包"
+CARD_TITLE = "甜心音浪礼 Ⅵ"
 UNLOCK = "拥有伙伴·甜心歌姬后解锁"
 CHAR = os.path.join(ROOT, "docs/风格卡/S18虚拟歌姬礼包_参考/角色模型.webp")
 FB = "C:/Windows/Fonts/SourceHanSansCN-Heavy.otf"
@@ -196,8 +196,10 @@ def place_char(page, size, cx, foot):
     glow = Image.new("RGBA", page.size)
     a = ch.getchannel("A").filter(ImageFilter.GaussianBlur(18)).point(lambda v: min(255, v * 1.4))
     glow.paste(Image.new("RGBA", ch.size, (255, 120, 200, 255)), (x, y), a)
-    page.alpha_composite(glow.filter(ImageFilter.GaussianBlur(10)))
-    page.alpha_composite(ch, (x, y))
+    layer = glow.filter(ImageFilter.GaussianBlur(10))
+    layer.alpha_composite(ch, (x, y))
+    page.alpha_composite(layer)
+    return layer  # 立绘层(含柔光),切图时单独存
 
 
 # 人物可见高度(角尖到脚底)、中线、脚底(11-02 用户定:照 v1 小恶魔版的人物大小,站在舞台上、脚下留地板倒影)
