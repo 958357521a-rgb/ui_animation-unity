@@ -36,7 +36,7 @@ description: 扭蛋界面主题背景设计(每期一张 2436×1125 背景,有�
    - 提示词 = 风格卡「提示词底稿」+ 版式句:`one large simple themed backdrop behind the empty center framing the performer like a halo, smaller prop groups on both sides getting smaller and softer toward the edges, lights along the top edge, stage floor with perspective lines leading to the center, calm smooth floor in front, clean sky in the upper left area, no text`。
    - 参考图用文件路径传:本期 `_参考/` 里的角色设定 + 1–2 张氛围参考(构图节奏)。模板干净背景只在要对齐明暗时带上。
    - 比例选最接近 2436:1125 的宽幅,出完等比铺满 2436×1125 并居中裁切。存到 `exports/gacha_bg/<期名>/`,对话里只留路径。
-   - **细化 / 改图(输入是已定稿或用户调过的图)不能居中裁切**(11-02 踩过):模型按 21:9 出图时会把整张构图横向拉宽,居中裁再切掉两边,物件位置全变。做法:输出整张(或边缘对齐搜出的极小裁边)直接压回原图比例 2436×1125,再和原图叠网格对比物件位置。
+   - **细化 / 改图(输入是已定稿或用户调过的图)不能居中裁切**(11-02 踩过):模型按 21:9 出图时会把整张构图横向拉宽,居中裁再切掉两边,物件位置全变。做法:输出整张(或边缘对齐搜出的极小裁边)直接压回原图比例 2436×1125,再和原图叠网格对比物件位置。细化还会把背景墙 / 光束的虚化(景深)画清楚 → 用 `python dev/gacha_bg/match_blur.py --src 原图 --img 细化版 --out …` 照原图补回(默认 sigma 4.5,看 `_虚化遮罩.png` 确认物件没被虚)。
    - 有角色版:在选定的无角色版上做局部重绘,只改 character_slot 区域,别的不动。
 4. **验收(必跑)**:`python dev/gacha_bg/gacha_check.py <图>`。
    - 有 ✗ 先修再交;! 写进交付说明。
