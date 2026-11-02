@@ -15,16 +15,43 @@ SIZES = {"卡片框": (345, 444), "折扣角标": (124, 77), "置灰遮罩": (34
          "信息行底": (280, 28), "解锁条底": (337, 59)}
 
 
-def grey_button(frame):
-    """价格按钮(卡片框下部的高饱和区)去色压暗,其余不动。"""
-    out = frame.copy(); px = out.load()
-    y0 = int(frame.height * 0.78)
-    for y in range(y0, frame.height):
-        for x in range(frame.width):
+def clean_edge(im):
+    """绿底抠图后的边缘清理(11-02 用户:投影边缘不自然):
+    去掉 AI 在绿底上画的投影(抠完是半透明暗青色)和贴边的绿色溢色,外轮廓重新抗锯齿,再补一层干净的合成投影。画布尺寸不变。"""
+    im = im.copy(); px = im.load(); W, H = im.size
+    solid = im.getchannel("A").point(lambda v: 255 if v > 128 else 0)
+    near = solid.point(lambda v: 255 - v).filter(ImageFilter.MaxFilter(max(5, W // 25) | 1)).load()  # 贴近外轮廓的一圈
+    for y in range(H):
+        for x in range(W):
             r, g, b, a = px[x, y]
-            if a and max(r, g, b) - min(r, g, b) > 50:
-                v = int((0.299 * r + 0.587 * g + 0.114 * b) * 0.8)
-                px[x, y] = (v, v, v + 6, a)
+            if not a: continue
+            if g > max(r, b): g = max(r, b)  # 去绿溢色(卡片框里没有绿色)
+            if near[x, y] and min(g, b) - r >= 10 and max(r, g, b) < 175: a = 0  # 暗青色 = 抠剩的投影
+            px[x, y] = (r, g, b, a)
+    k = max(3, W // 120) | 1
+    al = im.getchannel("A").point(lambda v: 255 if v > 128 else 0).filter(ImageFilter.MinFilter(k)).filter(ImageFilter.MaxFilter(k))
+    al = al.filter(ImageFilter.GaussianBlur(max(0.6, W / 700)))
+    im.putalpha(al)
+    sh = Image.new("RGBA", (W, H), (46, 14, 40, 0))
+    sh.putalpha(al.point(lambda v: v * 90 // 255).filter(ImageFilter.GaussianBlur(W / 90)))
+    out = Image.new("RGBA", (W, H)); out.alpha_composite(sh, (0, max(2, W // 115))); out.alpha_composite(im)
+    return out
+
+
+def grey_button(frame):
+    """价格按钮(卡片框下部)去色压暗:按饱和度渐变混合,按钮本体全灰,抗锯齿边和粉色光晕按比例变灰,
+    浅色卡身几乎不动 —— 不用膨胀遮罩(会在卡身上压出一圈灰晕)。"""
+    W, H = frame.size; y0 = int(H * 0.76)
+    out = frame.copy(); px = out.load()
+    for y in range(y0, H):
+        for x in range(W):
+            r, g, b, a = px[x, y]
+            if not a: continue
+            sat = max(r, g, b) - min(r, g, b)
+            f = min(1.0, max(0.0, (sat - 12) / 40))
+            if not f: continue
+            v = (0.299 * r + 0.587 * g + 0.114 * b) * (1 - 0.38 * min(1.0, max(0.0, (sat - 60) / 60)))  # 浅色光晕只去色不压暗
+            px[x, y] = (int(r + (v - r) * f), int(g + (v - g) * f), int(b + (v + 6 - b) * f), a)
     return out
 
 
@@ -39,11 +66,11 @@ def mask_of(frame):
 def main(scheme, card, frame, popup, out, bg=None):
     sc = SCHEME[scheme]; os.makedirs(out, exist_ok=True)
     hi = {}  # 2x 源
-    fr = bbox_crop(key_green(Image.open(frame)))
+    fr = clean_edge(bbox_crop(key_green(Image.open(frame))))
     hi["卡片框"] = fr
     hi["已售罄卡片框"] = grey_button(fr)
     hi["置灰遮罩"] = mask_of(fr)
-    hi["弹窗卡片"] = bbox_crop(key_green(Image.open(popup)))
+    hi["弹窗卡片"] = clean_edge(bbox_crop(key_green(Image.open(popup))))
     # 角标:整卡实例(353×452 内容范围,角标在 (0,0) 124×77)按 S18 角标 alpha 抠
     inst = bbox_crop(key_green(Image.open(card)))
     s = inst.width / 353
