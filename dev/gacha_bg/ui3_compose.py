@@ -13,6 +13,8 @@ from ui_compose import ZONES, key_green, drop_ghosts, logo_box, fit, glow
 
 FONT = r"C:\Windows\Fonts\msyhbd.ttc"
 BTN = (531, 171)
+PLATE = (434, 110)       # 用户定:按钮体(看得见的部分)434×110,和旧按钮体量一致
+PLATE_C = (265, 89)      # 旧按钮 raw1 不透明区中心
 # Figma 748:987(隐藏备份)里按钮内部件,相对按钮左上角
 COIN = (115, 50, 66, 65)
 OLD = (192, 34)          # 原价 x168(删除线)
@@ -77,7 +79,10 @@ def load(spec, figma, size):
         return recolor(os.path.join(figma, name), HUE[name]).resize(size, Image.LANCZOS)
     if spec.startswith("pair:"):                   # pair:图:0/1 = 一张图里左右一对按钮,取左 / 右
         path, idx = spec[5:].rsplit(":", 1)
-        return stretch_mid(keep_main(split_pair(key_green(Image.open(path)))[int(idx)]), *size)
+        body = stretch_mid(keep_main(split_pair(key_green(Image.open(path)))[int(idx)]), *PLATE)
+        out = Image.new("RGBA", size)               # 画布仍是组件 531×171,看得见的按钮体 434×110 摆在旧按钮体中心
+        out.alpha_composite(body, (PLATE_C[0] - PLATE[0] // 2, PLATE_C[1] - PLATE[1] // 2))
+        return out
     im = drop_ghosts(key_green(Image.open(spec)))
     return fit(im, *size)                          # 等比缩进组件尺寸,不拉伸
 
