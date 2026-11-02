@@ -37,8 +37,9 @@ def crisp_cut(path):
     return out.crop(out.getchannel("A").point(lambda v: 255 if v > 24 else 0).getbbox())
 
 
-def with_shadow(body, size):
-    """本体放进组件画布(下方留投影位),在本体下面垫一层合成投影:本体边缘保持清晰,投影只在下沿露出来。"""
+def with_shadow(body, size, shadow=False):
+    """本体放进组件画布(下方留投影位)。11-02 用户定:投影不画进图,在 Figma 卡片框图层上加投影效果(照 S18);
+    shadow=True 才在本体下面垫一层合成投影(旧做法)。"""
     w, h = size; W = body.width
     s = W / (w - 4)  # 左右各留 2px(1x)
     cw, ch = round(w * s), round(h * s)
@@ -49,7 +50,8 @@ def with_shadow(body, size):
     sh = Image.new("RGBA", b.size, (60, 16, 52, 0)); sh.putalpha(al.point(lambda v: v * 110 // 255))
     pad = Image.new("RGBA", (cw, ch)); pad.alpha_composite(sh, (x0, round(5 * s)))
     pad = pad.filter(ImageFilter.GaussianBlur(3 * s))
-    canvas.alpha_composite(pad); canvas.alpha_composite(b, (x0, 0))
+    if shadow: canvas.alpha_composite(pad)
+    canvas.alpha_composite(b, (x0, 0))
     return canvas, (x0, 0, b.width, b.height)
 
 
