@@ -1,4 +1,4 @@
-﻿"""赛季礼包小样拼图:按 docs/赛季礼包规范.md 第 3 节坐标拼整页(区域锁死,AI 只出素材)。
+"""赛季礼包小样拼图:按 docs/赛季礼包规范.md 第 3 节坐标拼整页(区域锁死,AI 只出素材)。
 用法: python compose.py <素材目录> <方案字母> <卡片编号> <输出.png>
 素材目录里要有 <方案>_bg.png、<方案>_card<n>.png、icons.png;通用页签用本目录 通用页签.png。
 S18 原件在 s18/(卡片框 / 角标 / 信息行 / 解锁条,从 Figma 组件板 746:587 导出);信息行、解锁条由脚本给原件换色,不用 AI 出。
@@ -111,7 +111,7 @@ def recolor(im, dh, dv=1.0):
     return out
 
 
-def unlock_bar(sc):
+def unlock_bar(sc, text=True):
     bar = recolor(Image.open(os.path.join(S18, "解锁_raw1.png")), sc["hue"], sc["dark"])
     src = Image.open(os.path.join(S18, "解锁条.png")).convert("RGBA")
     # 锁和两侧细线:从 S18 原件取白色像素原样搬过来(结构不动)
@@ -124,20 +124,21 @@ def unlock_bar(sc):
                 t = (w - 200) / 55
                 o = bp[x, y]
                 bp[x, y] = tuple(int(o[k] * (1 - t) + 255 * t) for k in range(3)) + (max(o[3], al),)
-    d = ImageDraw.Draw(bar)
-    d.text((168, 43), UNLOCK, font=font(FB, 19), fill=(255, 255, 255), anchor="mm")
+    if text:
+        ImageDraw.Draw(bar).text((168, 43), UNLOCK, font=font(FB, 19), fill=(255, 255, 255), anchor="mm")
     return bar
 
 
-def info_row(sc):
+def info_row(sc, text=True):
     """S18 信息行(Figma 导出带灰底,按原样重建):淡紫渐变底条向右渐隐 + 计时图标 + 两段文字,只换色。"""
     row = Image.new("RGBA", (280, 28)); d = ImageDraw.Draw(row)
     for x in range(280):
         d.line([(x, 0), (x, 27)], fill=(183, 176, 233, int(255 * (1 - (x / 280) ** 2))))
     row.alpha_composite(Image.open(os.path.join(S18, "信息行_raw.png")).convert("RGBA"), (6, 5))
-    f = font(FM, 17)
-    d.text((29, 14), "剩余：1小时", font=f, fill=(255, 255, 255), anchor="lm")
-    d.text((277, 14), "限购1/1", font=f, fill=(115, 99, 181), anchor="rm")
+    if text:
+        f = font(FM, 17)
+        d.text((29, 14), "剩余：1小时", font=f, fill=(255, 255, 255), anchor="lm")
+        d.text((277, 14), "限购1/1", font=f, fill=(115, 99, 181), anchor="rm")
     return recolor(row, sc["hue"])
 
 
@@ -155,31 +156,59 @@ def card(base, icon, state, sc):
         a = c.getchannel("A")
         g = ImageOps.grayscale(c.convert("RGB")).point(lambda v: int(v * 0.7))
         c = Image.merge("RGBA", (g, g, g, a))
-        st = Image.new("RGBA", (149, 119)); sd = ImageDraw.Draw(st)
-        sd.ellipse((10, 4, 139, 115), fill=(70, 200, 140, 235), outline=(255, 255, 255), width=4)
-        sd.text((74, 60), "已售罄", font=font(FB, 30), fill=(255, 255, 255), anchor="mm")
-        c.alpha_composite(st.rotate(15, resample=Image.BICUBIC), (103, 116))
+        # 已售罄印章沿用 S18 原件(746:611);文字层位置照 734:4428(相对印章 (24,60) 93×63)
+        st = Image.open(os.path.join(S18, "印章_raw.png")).convert("RGBA")
+        sd = ImageDraw.Draw(st)
+        sd.text((24 + 47, 60 + 26), "已售罄", font=font(FB, 30), fill=(255, 255, 255), anchor="mm")
+        c.alpha_composite(st, (103, 116))
     if state == "lock":
         c.alpha_composite(unlock_bar(sc), (12, 210))
     return c
 
 def topbar(page):
+    """右上角两条货币条沿用 S18 原件(钻石 950:1863、货币条底 734:4471、优优币 734:4472),不换。"""
+    ld = lambda n, size=None: (lambda im: im.resize(size, Image.LANCZOS) if size else im)(
+        Image.open(os.path.join(S18, n + ".png")).convert("RGBA"))
+    ox, oy = 1790, 20
+    page.alpha_composite(ld("钻石_raw1", (246, 54)), (ox + 36, oy + 19))
+    page.alpha_composite(ld("钻石_raw3", (80, 79)), (ox + 219, oy + 8))
+    page.alpha_composite(ld("钻石_raw2", (64, 58)), (ox + 16, oy + 19))
+    page.alpha_composite(ld("货币条底_raw"), (2119, 25))
+    page.alpha_composite(ld("优优币_raw"), (2099, 28))
     d = ImageDraw.Draw(page)
-    for x, w, icon, num in ((1790, 299, (190, 90, 255), "48541"), (2119, 263, (255, 205, 70), "0")):
-        d.rounded_rectangle((x + 20, 34, x + w - 10, 100), 33, fill=(30, 20, 35, 200))
-        d.text((x + w / 2 + 10, 67), num, font=font(FB, 34), fill=(255, 255, 255), anchor="mm")
-        d.ellipse((x + w - 60, 44, x + w - 16, 90), fill=(255, 80, 160))
-        d.text((x + w - 38, 66), "+", font=font(FB, 34), fill=(255, 255, 255), anchor="mm")
-    d.polygon([(1810, 66), (1840, 36), (1870, 66), (1840, 100)], fill=(190, 90, 255))
-    d.ellipse((2099, 28, 2174, 102), fill=(255, 205, 70), outline=(255, 255, 255), width=3)
+    d.text((ox + 151, oy + 47), "48541", font=font(FB, 34), fill=(255, 255, 255), anchor="mm")
 
 
-def main(src, scheme, n, out):
+def place_char(page, size, cx, foot):
+    """立绘按看得见的人物定位:人物内容中线放在 cx,脚底(内容下沿)放在 foot;身后加一圈柔光。"""
+    ch = Image.open(CHAR).convert("RGBA")
+    ch = ch.crop(ch.getchannel("A").getbbox())
+    # 头顶半透明白色光圈去掉(11-02 用户)
+    px = ch.load()
+    for y in range(int(ch.height * 0.3)):
+        for x in range(ch.width):
+            r, g, b, a = px[x, y]
+            if 0 < a < 230 and min(r, g, b) > 200:
+                px[x, y] = (r, g, b, 0)
+    s = size / ch.height
+    ch = ch.resize((round(ch.width * s), size), Image.LANCZOS)
+    x, y = round(cx - ch.width / 2), foot - ch.height
+    glow = Image.new("RGBA", page.size)
+    a = ch.getchannel("A").filter(ImageFilter.GaussianBlur(18)).point(lambda v: min(255, v * 1.4))
+    glow.paste(Image.new("RGBA", ch.size, (255, 120, 200, 255)), (x, y), a)
+    page.alpha_composite(glow.filter(ImageFilter.GaussianBlur(10)))
+    page.alpha_composite(ch, (x, y))
+
+
+# 人物可见高度(角尖到脚底)、中线、脚底(11-02 用户定:照 v1 小恶魔版的人物大小,站在舞台上、脚下留地板倒影)
+CHAR_H, CHAR_CX, CHAR_FOOT = 720, 2177, 980
+
+
+def main(src, scheme, n, out, bgfile=None):
     sc = SCHEME[scheme]
-    bg = Image.open(os.path.join(src, f"{scheme}_bg.png")).convert("RGBA")
+    bg = Image.open(bgfile or os.path.join(src, f"{scheme}_bg.png")).convert("RGBA")
     page = ImageOps.fit(bg, (W, H), Image.LANCZOS)
-    ch = Image.open(CHAR).convert("RGBA").resize((1174, 1174), Image.LANCZOS)
-    page.paste(ch, (1502, -18), ch)
+    place_char(page, CHAR_H, CHAR_CX, CHAR_FOOT)
     # 卡片实例内容范围 = 角标 (0,0) 到 卡片框右下 (353,452)
     base = bbox_crop(key_green(Image.open(os.path.join(src, f"{scheme}_card{n}.png")))).resize((353, 452), Image.LANCZOS)
     ic = icons(os.path.join(src, "icons.png"))
@@ -193,4 +222,4 @@ def main(src, scheme, n, out):
 
 
 if __name__ == "__main__":
-    main(*sys.argv[1:5])
+    main(*sys.argv[1:6])
