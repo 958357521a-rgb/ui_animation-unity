@@ -73,16 +73,22 @@ def stretch_mid(im, w, h, a=0.42, b=0.58):
     return out
 
 
-BADGE = (0.845, 0.10, 0.935, 0.27)   # 黑胶霓虹底图右上角 AI 自带的「Discount」小标签(相对按钮体),折扣角标用组件的
+BADGE = (0.852, 0.114, 0.929, 0.254)   # 黑胶霓虹底图右上角 AI 自带的「Discount」小标签(相对按钮体,放大量过),折扣角标用组件的
 
 
 def erase_badge(body):
-    """用标签左边同一高度的玻璃面盖掉 AI 画进底图的小标签(玻璃面横向基本均匀)。"""
+    """擦掉 AI 画进底图的小标签:只动标签那一小块。标签底下本来是直的内框线 + 高光带上沿,所以用按钮中段
+    (拉伸出来的、横向一致)的一列当竖向轮廓,再加上从标签左右两侧量到的差值做横向过渡;高光圆角、描边不动。"""
     w, h = body.size
     x0, y0, x1, y1 = (round(v * s) for v, s in zip(BADGE, (w, h, w, h)))
-    dx = x1 - x0 + round(w * 0.02)
-    body = body.copy(); body.paste(body.crop((x0 - dx, y0, x1 - dx, y1)), (x0, y0))
-    return body
+    a = np.asarray(body).astype(np.float64)
+    k = max(1, round(w * 0.004))                     # 取几列平均,避免单个噪点
+    col = lambda x: a[y0:y1, x:x + k].mean(axis=1, keepdims=True)
+    P = col(round(w * 0.6))                          # 中段竖向轮廓
+    L, R = col(x0 - k) - P, col(x1) - P              # 两侧和中段的差(横向渐变)
+    t = np.linspace(0, 1, x1 - x0)[None, :, None]
+    a[y0:y1, x0:x1] = P + L * (1 - t) + R * t
+    return Image.fromarray(np.clip(a, 0, 255).astype(np.uint8), "RGBA")
 
 
 def load(spec, figma, size):
