@@ -12,6 +12,7 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--src", required=True); p.add_argument("--img", required=True); p.add_argument("--out", required=True)
     p.add_argument("--sigma", type=float, default=4.5); p.add_argument("--thr", type=float, default=3.0)
+    p.add_argument("--soft", type=float, default=2.0, help="整张模糊 sigma,0 = 只虚背景")
     a = p.parse_args()
     im = Image.open(a.img).convert("RGB"); W, H = im.size
     o = np.asarray(Image.open(a.src).convert("L").resize((W, H), Image.LANCZOS), float)
@@ -26,6 +27,8 @@ def main():
     x = np.asarray(im, float); w = ndimage.gaussian_filter(bg, a.sigma) + 1e-4
     bl = np.stack([ndimage.gaussian_filter(x[..., c] * bg, a.sigma) / w for c in range(3)], -1)
     out = x * (1 - bg[..., None]) + bl * bg[..., None]
+    if a.soft:  # 整张再柔一层(用户要的「模糊感」,物件也软)
+        out = np.stack([ndimage.gaussian_filter(out[..., c], a.soft) for c in range(3)], -1)
     Image.fromarray(np.clip(out, 0, 255).astype(np.uint8)).save(a.out); print(a.out)
 
 
