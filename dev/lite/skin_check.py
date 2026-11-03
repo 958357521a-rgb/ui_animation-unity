@@ -28,6 +28,7 @@ SCRAP_WARN, SCRAP_FAIL = 0.015, 0.05      # 部件和底框同色同位的占比
 RAGGED_WARN, RAGGED_FAIL = 0.12, 0.25     # 部件轮廓细刺 / 毛边(v2 挂带 0.39 ✗;v3 全部 <0.12)
 GHOST_FAIL, GHOST_WARN = 0.15, 0.06   # 11-03 部件挪开后底下:半透明占比
 GREY_FAIL, GREY_WARN = 0.12, 0.06     # 11-03 部件挪开后底下:浅灰比四周多出的占比(星星拿走后留灰色星形)
+SCRAP_PX, SCRAP_N_FAIL = 12, 3         # 11-03 图层游离碎片:≥12px 的小渣,≥3 块 ✗
 PIECE_MIN = 0.015                         # 11-03 星星逐颗、竖条逐根:一个动效部件里 ≥最大块 1.5% 的分离块超过 1 个 → ✗
 
 
@@ -98,6 +99,14 @@ def frame_scrap(part, base):
     lab, n = ndimage.label(m)
     if n: m = np.isin(lab, 1 + np.where(ndimage.sum_labels(m, lab, range(1, n + 1)) >= 30)[0])
     return float(m.sum() / max((part[..., 3] > 0.5).sum(), 1))
+
+
+def scraps(a):
+    """一层里飘着的小碎渣数:不挨主体、面积 ≥ SCRAP_PX 且 < 最大块 2% 的块(字的笔画、星点这种成形的块面积够大不算)。"""
+    lab, n = ndimage.label(a[..., 3] > 0.3)
+    if n < 2: return 0
+    sz = ndimage.sum(np.ones(lab.shape), lab, range(1, n + 1))
+    return int(((sz >= SCRAP_PX) & (sz < sz.max() * 0.02)).sum())
 
 
 def pieces(a):
@@ -342,6 +351,12 @@ def measure_section(d):
                     if pc > 1:
                         r['m'].setdefault('部件分离块', {})[x[0]['name']] = pc
                         r['fail'].append(f'部件「{x[0]["name"]}」里有 {pc} 块互相分开的东西,星星要逐颗、竖条要逐根单独成层')
+            # 图层游离碎片(11-03「残影、补丁方块、底框碎片」):底框 / 字层等每层单独看,不能飘着拆剩的小渣
+            for x in lay1:
+                fr = scraps(x[3])
+                if fr:
+                    r['m'].setdefault('图层游离碎片', {})[x[0]['name']] = fr
+                    (r['fail'] if fr >= SCRAP_N_FAIL else r['warn']).append(f'图层「{x[0]["name"]}」单独看有 {fr} 块飘着的小碎渣(拆剩的边 / 描边),清掉或并回所属部件')
 
     # 静态图整体指标
     r['m']['清晰度'] = sharpness(S1)
