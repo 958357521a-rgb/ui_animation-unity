@@ -26,6 +26,9 @@ DECO_ROLES = ('ornament', 'deco')
 MOTION_OK = ('static', 'swing', 'float', 'drift')
 SCRAP_WARN, SCRAP_FAIL = 0.015, 0.05      # 部件和底框同色同位的占比(10-30 虚拟歌姬:v2 飘带 31.5% / 格子旗 6.9% ✗;v3 独立件 ≤5%,粉星压粉框会到 2~5%)
 RAGGED_WARN, RAGGED_FAIL = 0.12, 0.25     # 部件轮廓细刺 / 毛边(v2 挂带 0.39 ✗;v3 全部 <0.12)
+GHOST_FAIL, GHOST_WARN = 0.15, 0.06   # 11-03 部件挪开后底下:半透明占比
+GREY_FAIL, GREY_WARN = 0.12, 0.06     # 11-03 部件挪开后底下:浅灰比四周多出的占比(星星拿走后留灰色星形)
+PIECE_MIN = 0.015                         # 11-03 星星逐颗、竖条逐根:一个动效部件里 ≥最大块 1.5% 的分离块超过 1 个 → ✗
 
 
 def load(p):
@@ -95,6 +98,14 @@ def frame_scrap(part, base):
     lab, n = ndimage.label(m)
     if n: m = np.isin(lab, 1 + np.where(ndimage.sum_labels(m, lab, range(1, n + 1)) >= 30)[0])
     return float(m.sum() / max((part[..., 3] > 0.5).sum(), 1))
+
+
+def pieces(a):
+    """动效部件里互相分开的块数(只算 ≥ 最大块 PIECE_MIN 的,零星碎点不算)。星星逐颗、竖条逐根成层时应为 1。"""
+    lab, n = ndimage.label(ndimage.binary_closing(a[..., 3] > 0.5, iterations=2))
+    if n < 2: return n
+    sz = ndimage.sum(np.ones(lab.shape), lab, range(1, n + 1))
+    return int((sz >= sz.max() * PIECE_MIN).sum())
 
 
 def ragged(a):
@@ -297,6 +308,20 @@ def measure_section(d):
                     worst = max(worst, int(((As[k] > 0.9) & (mv < 0.5) & enc).sum()))
                 if worst > 100: r['fail'].append(f'部件「{x[0]["name"]}」动到最大处露出底下 {worst} 像素透明洞(2x),底框没补全')
                 elif worst > 20: r['warn'].append(f'部件「{x[0]["name"]}」动到最大处露出 {worst} 像素透明洞(2x)')
+                # 盖住处残影(11-03「残影、补丁方块」):部件挪开后,它下面各层合起来不能是半透明 / 发灰的鬼影
+                if k:
+                    Cb = composite([(y[3], tuple(y[2]['position']), y[0].get('blend')) for y in lay1[:k]], 2 * W, 2 * H)
+                    on = As[k] > 0.5
+                    R = ndimage.binary_erosion(on, iterations=3) & (Cb[..., 3] > 0.05)
+                    if R.sum() >= 50:
+                        semi = float((R & (Cb[..., 3] < 0.9)).sum() / R.sum())
+                        ring = ndimage.binary_dilation(on, iterations=10) & (As[k] < 0.05) & (Cb[..., 3] > 0.5)
+                        hi, lo = Cb[..., :3].max(-1), Cb[..., :3].min(-1)
+                        gr = (Cb[..., 3] > 0.5) & (hi - lo < 0.1) & (hi > 0.4) & (hi < 0.9)
+                        gx = float((gr & R).sum() / R.sum() - (gr & ring).sum() / max(ring.sum(), 1))
+                        r['m'].setdefault('盖住处残影', {})[x[0]['name']] = [round(semi, 3), round(gx, 3)]
+                        if semi > GHOST_FAIL or gx > GREY_FAIL: r['fail'].append(f'部件「{x[0]["name"]}」挪开后底下是残影(半透明 {semi:.0%} / 比四周多发灰 {gx:.0%}),底下那层没按自身结构补实')
+                        elif semi > GHOST_WARN or gx > GREY_WARN: r['warn'].append(f'部件「{x[0]["name"]}」挪开后底下有点残影(半透明 {semi:.0%} / 多发灰 {gx:.0%}),看一眼')
             # 部件要是干净独立的小件(10-30 用户:像 S17 中秋那样,不带底框碎片、边缘不发毛,动起来才不穿帮)
             bi = [i for i, x in enumerate(lay1) if x[0].get('role') == 'base']
             if bi:
@@ -311,6 +336,12 @@ def measure_section(d):
                     elif sc > SCRAP_WARN: r['warn'].append(f'部件「{x[0]["name"]}」有 {sc:.1%} 和底框同色同位,确认不是底框碎片')
                     if rg > RAGGED_FAIL: r['fail'].append(f'部件「{x[0]["name"]}」轮廓毛边 / 细刺 {rg:.2f}(干净独立件 ≤{RAGGED_WARN}),像从整图里硬抠')
                     elif rg > RAGGED_WARN: r['warn'].append(f'部件「{x[0]["name"]}」轮廓毛边 / 细刺 {rg:.2f},确认边缘干净')
+                    pc = pieces(x[3])
+                    if any(w in x[0]['name'] for w in ('均衡器', '竖条组', '星星组', '组')) and not x[0]['name'].rstrip('0123456789').endswith('_'):
+                        r['fail'].append(f'部件「{x[0]["name"]}」看名字是一组东西(挨在一起的几根竖条 / 几颗星),要逐根 / 逐颗拆成 竖条_1、竖条_2… 各自一层')
+                    if pc > 1:
+                        r['m'].setdefault('部件分离块', {})[x[0]['name']] = pc
+                        r['fail'].append(f'部件「{x[0]["name"]}」里有 {pc} 块互相分开的东西,星星要逐颗、竖条要逐根单独成层')
 
     # 静态图整体指标
     r['m']['清晰度'] = sharpness(S1)
