@@ -260,7 +260,10 @@ def measure_section(d):
         if gs > 0.05: r['fail'].append(f'「{l["name"]}」半透明边 {gs:.0%} 偏绿(抠绿残留)')
         # S 级动效:同一个 4 秒循环,只摆动 / 浮动 / 漂移,没有闪烁、缩放呼吸(homeskin skill「动效」)
         mt = (l.get('motion') or {}).get('type', 'static')
-        if mt not in MOTION_OK: r['fail'].append(f'「{l["name"]}」动效 {mt} 不允许(只用 swing 摆动 / float 浮动 / drift 漂移,没有闪烁、缩放呼吸)')
+        # 例外(11-05 用户定):屏幕混合的灯光层(霓虹 / 灯点 / 射灯)可用 glow = 4 秒同曲线缓慢明暗,不能快闪
+        if mt == 'glow' and l.get('blend') != 'screen':
+            r['fail'].append(f'「{l["name"]}」glow 只给屏幕混合的灯光层用,物件只用 swing / float / drift')
+        elif mt not in MOTION_OK + ('glow',): r['fail'].append(f'「{l["name"]}」动效 {mt} 不允许(只用 swing 摆动 / float 浮动 / drift 漂移,灯光层 glow 缓慢明暗;没有闪烁、缩放呼吸)')
         elif mt != 'static' and (l['motion'].get('loop') or l['motion'].get('duration')) != 4:
             r['fail'].append(f'「{l["name"]}」动效周期 {l["motion"].get("loop") or l["motion"].get("duration")}s,所有物件统一 4 秒循环')
 
