@@ -1,4 +1,4 @@
-"""主页皮肤 / 装扮切图交付前自动验收。
+﻿"""主页皮肤 / 装扮切图交付前自动验收。
 
 用法:
   python dev/lite/skin_check.py <切图文件夹> [--ref <完成稿文件夹>] [--color-ref 配色参考图] [--layout 板序]
@@ -156,8 +156,14 @@ def shadow(a):
     return float(al[out].sum() / rim.sum()), int(dt[out].max())
 
 
-def visible_size(a):
-    ys, xs = np.where(a[..., 3] > 0.9)
+def visible_size(a, core=False):
+    """core=True:只量板子主体(实色覆盖 ≥30% 的行 / 列),伸出底板的装饰(11-06 虚拟歌姬:星星超出底板要保留)不算进尺寸。"""
+    m = a[..., 3] > 0.9
+    if core:
+        cx, cy = m.mean(0), m.mean(1)
+        xs, ys = np.where(cx >= 0.3 * cx.max())[0], np.where(cy >= 0.3 * cy.max())[0]
+        return (int(xs[-1] - xs[0] + 1), int(ys[-1] - ys[0] + 1)) if len(xs) else (0, 0)
+    ys, xs = np.where(m)
     return (int(xs.max() - xs.min() + 1), int(ys.max() - ys.min() + 1)) if len(xs) else (0, 0)
 
 
@@ -222,7 +228,9 @@ def measure_section(d):
     if S2.size != (2 * W, 2 * H): r['fail'].append(f'2x 静态图 {S2.size[0]}x{S2.size[1]} ≠ 1x 的 2 倍')
     k = r['kind']
     if k in BOARDS:   # 底板画布可以外扩放投影,看得见的板子本身要等于规范尺寸
-        vw, vh = visible_size(S1); sw, sh = SIZES[k]; r['m']['板子尺寸'] = f'{vw}x{vh}'
+        vw, vh = visible_size(S1, core=True); sw, sh = SIZES[k]; r['m']['板子尺寸'] = f'{vw}x{vh}'
+        ow, oh = visible_size(S1)
+        if ow - vw > 6 or oh - vh > 6: r['m']['伸出底板装饰'] = f'{ow - vw}x{oh - vh}'
         e = max(abs(vw - sw), abs(vh - sh))
         if e > 24: r['fail'].append(f'看得见的底板 {vw}x{vh},规范 {sw}x{sh}')
         elif e > 6: r['warn'].append(f'看得见的底板 {vw}x{vh},规范 {sw}x{sh}(差 {e}px,内容区会对不齐)')
@@ -458,7 +466,7 @@ def main():
             v, q = m.get(k), (ref or {'m': {}})['m'].get(k)
             if v is None: return None
             return f'{k} {v:.2f}' + (f'(完成稿 {q:.2f})' if isinstance(q, float) else '') if isinstance(v, float) else f'{k} {v}'
-        nums = ' · '.join(x for x in map(f, ('板子尺寸', '清晰度', '2x细节', '边缘过渡', '投影量', '投影伸出', '合成差异', '叠回效果图最大差', '头身接缝')) if x)
+        nums = ' · '.join(x for x in map(f, ('板子尺寸', '清晰度', '2x细节', '边缘过渡', '投影量', '投影伸出', '合成差异', '叠回效果图最大差', '头身接缝', '伸出底板装饰')) if x)
         out.append(f'\n## {r["name"]} — {tag}\n{nums}')
         out += ['- ✗ ' + x for x in r['fail']] + ['- △ ' + x for x in r['warn']]
     txt = '\n'.join(out)
