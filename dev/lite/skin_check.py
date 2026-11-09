@@ -21,6 +21,9 @@ SIZES = {'主页背景': (2436, 1125), '个人信息底板': (902, 864), '窄底
          '宽底板': (1260, 862), '连续底部导航': (2436, 108)}
 ICON_SIZES = {'头像框': (256, 256), '名字底': (447, 130), '气泡框': (195, 133), '称号': (304, 72)}
 BOARDS = ('个人信息底板', '窄底板', '中底板', '宽底板')
+# 头部高度(板顶到主体顶,1x):游戏标题条是卡片顶 0-114、文字中心 57,头部要这么高标题才居中;信息卡头部色条 249
+# 出处 11-09 用户「标题没居中、上半部分装饰过大」,数值量自游戏里显示正确的 Theme_47(创作者 A)
+HEAD_H = {'个人信息底板': 244, '窄底板': 113, '中底板': 114, '宽底板': 113}
 LAYOUT_X0, LAYOUT_Y, GAP, NAV_Y = 880, 78, 50, 1017   # 第一张底板看得见的左边缘 / 上沿 / 间距 / 导航 y
 DECO_ROLES = ('ornament', 'deco')
 MOTION_OK = ('static', 'swing', 'float', 'drift')
@@ -283,6 +286,12 @@ def measure_section(d):
         r['m']['头身接缝'] = ov
         if ov > 1: r['warn'].append(f'头部下沿压进主体 {ov:.0f}px(2x 坐标/2),确认是有意叠压')
         if ov < -1: r['fail'].append(f'头部和主体之间漏缝 {-ov:.0f}px')
+        if k in HEAD_H:   # S1 是 RGBA 0-1
+            cov = (S1[..., 3] > 0.5).sum(1); top = int(np.argmax(cov >= cov.max() * 0.3))
+            hh = bt / 2 - top; r['m']['头部高度'] = round(hh)
+            d_ = abs(hh - HEAD_H[k])
+            if d_ > 15: r['fail'].append(f'头部高 {hh:.0f}px,规范 {HEAD_H[k]}(游戏标题条 114、文字中心 57,头部不对标题就不居中)')
+            elif d_ > 6: r['warn'].append(f'头部高 {hh:.0f}px,规范 {HEAD_H[k]}')
 
     # 图层按 2x 坐标合成 = 静态图?(拆层后有没有丢东西 / 多残留)
     if lay1 and all(x[3] is not None for x in lay1):
